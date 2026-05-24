@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./logo.svg" width="90" height="90" alt="Beacon Logo" />
+  <img src="./logo.svg" width="160" height="160" alt="Beacon Logo" />
 </p>
 
 # Headlamp Beacon
