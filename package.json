@@ -1,0 +1,28 @@
+{
+  "name": "@kerberops/headlamp-beacon",
+  "version": "2.0.8",
+  "description": "Monitor versions of Headlamp plugins, core infrastructure deployments, and business apps — with visual status badges and optional PDF email reports.",
+  "license": "AGPL-3.0-only",
+  "homepage": "https://github.com/KerberOps/headlamp-beacon",
+  "keywords": [
+    "headlamp",
+    "headlamp-plugin",
+    "kubernetes",
+    "version-monitoring",
+    "gitops",
+    "k8s"
+  ],
+  "main": "dist/main.js",
+  "scripts": {
+    "start": "headlamp-plugin start",
+    "build": "headlamp-plugin build",
+    "package": "headlamp-plugin package",
+    "lint": "headlamp-plugin lint",
+    "format": "headlamp-plugin format",
+    "tsc": "headlamp-plugin tsc",
+    "test": "headlamp-plugin test"
+  },
+  "devDependencies": {
+    "@kinvolk/headlamp-plugin": "0.14.0"
+  }
+}
