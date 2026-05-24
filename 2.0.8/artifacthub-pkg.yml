@@ -9,6 +9,7 @@ description: >
   Kubernetes Jobs.
 license: AGPL-3.0-only
 homeURL: https://github.com/KerberOps/headlamp-beacon
+logoURL: https://raw.githubusercontent.com/KerberOps/headlamp-beacon/main/logo.svg
 links:
   - name: Source
     url: https://github.com/KerberOps/headlamp-beacon
