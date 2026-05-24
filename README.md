@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./logo.svg" width="160" height="160" alt="Beacon Logo" />
+  <img src="./logo.svg" width="200" height="200" alt="Beacon Logo" />
 </p>
 
 # Headlamp Beacon
@@ -230,6 +230,27 @@ headlamp-plugin install @kerberops/headlamp-beacon
 ```
 
 Once installed, a **Beacon** entry appears in the Headlamp sidebar. The Infrastructure and Headlamp Plugins views will populate once the updater has run at least once.
+
+---
+
+## Troubleshooting
+
+### Plugin Catalog not working on Kubernetes
+
+The Headlamp Plugin Catalog installs plugins into an `emptyDir` volume at runtime. In in-cluster Kubernetes deployments (especially with OIDC or a custom CA), this volume is lost on every pod restart and the installed plugins disappear.
+
+**Solution:** use the **initContainer pattern** — each plugin is copied into the shared plugin volume before the main Headlamp container starts, so it survives restarts without relying on the catalog.
+
+A ready-to-use Helm values file is provided at [`deploy/headlamp-values.yaml`](./deploy/headlamp-values.yaml). Deploy it with:
+
+```bash
+helm upgrade --install headlamp headlamp/headlamp \
+  --namespace ops-headlamp \
+  --create-namespace \
+  -f deploy/headlamp-values.yaml
+```
+
+Adjust the `image` field in the `beacon-plugin` initContainer to point to your built image, and remove the `flux-plugin` / `kubescape-plugin` blocks if you don't use those plugins.
 
 ---
 

@@ -1,0 +1,106 @@
+# Headlamp Helm values — with Beacon plugin via initContainer
+#
+# Use this file when the Headlamp Plugin Catalog does not persist plugins
+# correctly in a Kubernetes in-cluster deployment (a known limitation when
+# running Headlamp with in-cluster mode, custom CA, or OIDC).
+#
+# Install / upgrade:
+#   helm upgrade --install headlamp headlamp/headlamp \
+#     --namespace ops-headlamp \
+#     --create-namespace \
+#     -f deploy/headlamp-values.yaml
+#
+# Why initContainers instead of the Plugin Catalog?
+#   The Plugin Catalog installs plugins at runtime into an emptyDir volume.
+#   That volume is lost on every pod restart. InitContainers copy the plugin
+#   files before the main container starts, so they survive restarts and
+#   are available immediately — no catalog interaction required.
+# ─────────────────────────────────────────────────────────────────────────────
+
+config:
+  baseURL: "/k8s"        # adjust to your ingress path
+  inCluster: true
+  # extraArgs:
+  #   - "-insecure-ssl"
+
+  # ── OIDC (optional) ────────────────────────────────────────────────────────
+  # Remove this block entirely if you are not using OIDC authentication.
+  oidc:
+    clientID: "<your-oidc-client-id>"
+    issuerURL: "<your-issuer-url>"
+    scopes: "<your-scopes>"
+    secret:
+      create: false
+    externalSecret:
+      enabled: true
+      name: "headlamp-oidc"
+
+replicaCount: 1
+
+ingress:
+  enabled: false
+
+serviceAccount:
+  create: true
+  name: "headlamp-admin"
+
+clusterRoleBinding:
+  create: true
+  clusterRoleName: cluster-admin
+
+volumes:
+  - name: headlamp-plugins
+    emptyDir: {}
+
+volumeMounts:
+  - name: headlamp-plugins
+    mountPath: /headlamp/plugins
+
+initContainers:
+
+  # ── Beacon ──────────────────────────────────────────────────────────────────
+  - name: beacon-plugin
+    image: ghcr.io/<your-org>/beacon-plugin:2.0.8   # replace with your image
+    imagePullPolicy: Always
+    securityContext:
+      runAsUser: 0
+    command:
+      - /bin/sh
+      - -c
+      - |
+        mkdir -p /build/plugins/beacon && \
+        cp /app/plugins/beacon/main.js /build/plugins/beacon/ && \
+        cp /app/plugins/beacon/package.json /build/plugins/beacon/ && \
+        chown -R 100:101 /build/plugins/beacon
+    volumeMounts:
+      - name: headlamp-plugins
+        mountPath: /build/plugins
+
+  # ── Flux (optional) ─────────────────────────────────────────────────────────
+  - name: flux-plugin
+    image: ghcr.io/headlamp-k8s/headlamp-plugin-flux:v0.6.0
+    imagePullPolicy: Always
+    securityContext:
+      runAsUser: 0
+    command:
+      - /bin/sh
+      - -c
+      - |
+        mkdir -p /build/plugins/flux && \
+        cp -r /plugins/flux/* /build/plugins/flux/ && \
+        chown -R 100:101 /build/plugins
+    volumeMounts:
+      - name: headlamp-plugins
+        mountPath: /build/plugins
+
+  # ── Kubescape (optional) ────────────────────────────────────────────────────
+  - name: kubescape-plugin
+    image: quay.io/kubescape/headlamp-plugin:v0.10.8
+    imagePullPolicy: Always
+    command:
+      - /bin/sh
+      - -c
+      - mkdir -p /build/plugins/kubescape && cp -r /plugins/kubescape-plugin/* /build/plugins/kubescape/
+    volumeMounts:
+      - name: headlamp-plugins
+        mountPath: /build/plugins
