@@ -1,9 +1,31 @@
+<p align="center">
+  <img src="./logo.svg" width="90" height="90" alt="Beacon Logo" />
+</p>
+
 # Headlamp Beacon
 
 > A lighthouse for your Kubernetes cluster — watches versions of Headlamp plugins and core infrastructure, and lights up when an update is available.
 
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
-[![Headlamp Plugin](https://img.shields.io/badge/headlamp-plugin-blue)](https://headlamp.dev)
+<p align="center">
+  <a href="https://www.gnu.org/licenses/agpl-3.0"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg" alt="License: AGPL v3"/></a>
+  <a href="https://headlamp.dev"><img src="https://img.shields.io/badge/headlamp-plugin-blue" alt="Headlamp Plugin"/></a>
+</p>
+
+---
+
+## Why Beacon?
+
+Modern Kubernetes clusters are rarely simple. A typical production environment runs Headlamp itself, a handful of plugins, an ingress controller, a certificate manager, sealed secrets, monitoring stacks, and a growing number of business application deployments — each with its own release cycle.
+
+**Keeping all of those versions aligned and up to date is not optional.** Outdated components are one of the most common sources of security vulnerabilities and subtle bugs. A version mismatch between a plugin and Headlamp core can break the UI. An unpatched ingress controller can expose your cluster to known CVEs. A stale business app running a dependency with a known exploit may never show up in a security scan if nobody is tracking it.
+
+Most teams handle this reactively — they find out something is outdated when something breaks, or when a security advisory lands in their inbox. Beacon flips that dynamic:
+
+- **Visibility at a glance.** Every monitored component shows its running version alongside the latest available, with a clear status badge. No manual lookups, no spreadsheets.
+- **Embedded in your existing workflow.** Because Beacon lives inside Headlamp, the same tool your team already uses to manage the cluster, version awareness becomes part of the daily routine — not a separate dashboard nobody remembers to check.
+- **Zero external dependencies for the plugin.** The UI reads directly from ConfigMaps in the cluster. No external SaaS, no outbound connections from the browser, no data leaves your network.
+- **Actionable links.** Every outdated badge links directly to the GitHub release notes so whoever sees it can act on it immediately.
+- **Lightweight by design.** The updater runs once a day as a CronJob, finishes in seconds, and exits. There is nothing running continuously.
 
 ---
 
@@ -13,12 +35,54 @@ Beacon adds a **Beacon** section to the Headlamp sidebar with views for each mon
 
 | View | Description | Tier |
 |---|---|---|
-| Infrastructure | Core deployment versions vs latest on GitHub/GHCR | Free |
+| Infrastructure | Core deployment versions vs latest on GitHub / GHCR | Free |
 | Headlamp Plugins | Installed plugin versions vs latest published | Free |
 | Applications | Custom business app monitoring | Pro |
 | Settings | Email pipeline config & test | Pro |
 
 Each row shows the running container image tag alongside the latest known version, with a status badge: **Up to Date** / **Update Available** / **Error** / **Unknown**.
+
+---
+
+## Resource requirements
+
+Beacon is intentionally minimal. Here is what it costs to run:
+
+| Component | CPU request | CPU limit | Memory request | Memory limit | Disk |
+|---|---|---|---|---|---|
+| Beacon plugin | — | — | — | — | 25 KB (JS loaded in browser) |
+| beacon-updater CronJob | 50m | 200m | 64 Mi | 128 Mi | none (read-only rootfs) |
+| ConfigMaps (×4) | — | — | — | — | ~10–50 KB each |
+
+The plugin itself consumes **no cluster resources** — it is a 25 KB JavaScript file loaded in the browser that reads ConfigMaps via the existing Headlamp API proxy.
+
+The updater CronJob runs once per day, typically completes in under 30 seconds, and then exits. It has no persistent storage and no idle CPU or memory cost between runs.
+
+### Check your cluster's current utilisation
+
+Before deploying, you can inspect available headroom on your nodes:
+
+```bash
+# Node-level CPU and memory usage (requires metrics-server)
+kubectl top nodes
+
+# Detailed allocated resources per node
+kubectl describe nodes | grep -A 8 "Allocated resources"
+
+# Available (allocatable) capacity across all nodes
+kubectl get nodes -o custom-columns=\
+"NODE:.metadata.name,\
+CPU-ALLOCATABLE:.status.allocatable.cpu,\
+MEM-ALLOCATABLE:.status.allocatable.memory"
+
+# What is already running in ops-headlamp (if the namespace exists)
+kubectl top pods -n ops-headlamp
+```
+
+> If `kubectl top` returns `error: Metrics API not available`, your cluster is missing `metrics-server`. Install it with:
+> ```bash
+> kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+> ```
 
 ---
 
@@ -125,7 +189,7 @@ docker push ghcr.io/<your-org>/beacon-updater:2.0.8
 
 Then update the `image` field in `deploy/04-updater-cronjob.yaml` to point to your image.
 
-> **GitHub rate limits:** Unauthenticated requests to the GitHub API are limited to 60/hour per IP. If you monitor many apps, create a GitHub PAT and uncomment the `GITHUB_TOKEN` env block in the CronJob manifest.
+> **GitHub rate limits:** Unauthenticated requests to the GitHub API are limited to 60 req/hour per IP. If you monitor many apps, create a GitHub PAT and uncomment the `GITHUB_TOKEN` env block in the CronJob manifest.
 
 ---
 
