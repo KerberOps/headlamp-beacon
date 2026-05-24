@@ -1,0 +1,80 @@
+# beacon-updater CronJob
+#
+# Runs daily and writes the latest version of each monitored app
+# to the beacon-*-versions ConfigMaps consumed by the Headlamp plugin.
+#
+# IMAGE: build the updater image from updater/ and push it to your registry,
+# then replace the image field below.
+#
+# GITHUB_TOKEN (optional): uncomment the env block to avoid GitHub's
+# unauthenticated rate limit (60 req/h). Create the Secret first:
+#   kubectl create secret generic beacon-github-token \
+#     --from-literal=token=<your-pat> -n ops-headlamp
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: beacon-updater
+  namespace: ops-headlamp
+  labels:
+    app.kubernetes.io/name: beacon
+    app.kubernetes.io/component: updater
+spec:
+  schedule: "0 9 * * *"        # daily at 09:00 UTC — adjust to your timezone
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: beacon
+            app.kubernetes.io/component: updater
+        spec:
+          serviceAccountName: beacon-updater
+          restartPolicy: OnFailure
+          automountServiceAccountToken: true
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: updater
+              image: ghcr.io/kerberops/beacon-updater:2.0.8   # <-- replace with your image
+              imagePullPolicy: Always
+              env:
+                - name: NAMESPACE
+                  value: ops-headlamp
+                - name: PLUGINS_APPS_CM
+                  value: beacon-plugins-apps
+                - name: PLUGINS_VERSIONS_CM
+                  value: beacon-plugins-versions
+                - name: CORE_APPS_CM
+                  value: beacon-core-apps
+                - name: CORE_VERSIONS_CM
+                  value: beacon-core-versions
+                # Uncomment to avoid GitHub rate limits (60 req/h unauthenticated)
+                # - name: GITHUB_TOKEN
+                #   valueFrom:
+                #     secretKeyRef:
+                #       name: beacon-github-token
+                #       key: token
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]

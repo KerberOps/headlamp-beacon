@@ -1,0 +1,52 @@
+# RBAC for beacon-updater (free tier)
+#
+# Scoped to ops-headlamp namespace.
+# Grants the updater CronJob permission to read app definitions and
+# create/update the version cache ConfigMaps.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: beacon-updater
+  namespace: ops-headlamp
+  labels:
+    app.kubernetes.io/name: beacon
+    app.kubernetes.io/component: updater
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: beacon-updater
+  namespace: ops-headlamp
+  labels:
+    app.kubernetes.io/name: beacon
+    app.kubernetes.io/component: updater
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames:
+      - beacon-core-apps
+      - beacon-core-versions
+      - beacon-plugins-apps
+      - beacon-plugins-versions
+    verbs: ["get", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: beacon-updater
+  namespace: ops-headlamp
+  labels:
+    app.kubernetes.io/name: beacon
+    app.kubernetes.io/component: updater
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: beacon-updater
+subjects:
+  - kind: ServiceAccount
+    name: beacon-updater
+    namespace: ops-headlamp
