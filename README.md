@@ -109,7 +109,7 @@ beacon-updater CronJob (this repo — updater/)
 
 A full guide covering the first-steps setup flow, Settings configuration, and troubleshooting is available as a PDF:
 
-→ [Beacon Free — User Manual](./docs/customer/free/Beacon%20Free%20—%20User%20Manual.pdf)
+→ [Beacon Free - User Manual](./docs/customer/free/Beacon%20Free%20-%20User%20Manual.pdf)
 
 ---
 
