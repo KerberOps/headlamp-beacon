@@ -16,6 +16,15 @@ links:
 maintainers:
   - name: KerberOps
     email: kerberops@outlook.com
+screenshots:
+  - title: Sidebar navigation
+    url: https://raw.githubusercontent.com/KerberOps/headlamp-beacon/main/screenshots/sidebar-entries.png
+  - title: Status badges
+    url: https://raw.githubusercontent.com/KerberOps/headlamp-beacon/main/screenshots/status-badges.png
+  - title: Infrastructure settings
+    url: https://raw.githubusercontent.com/KerberOps/headlamp-beacon/main/screenshots/settings-infrastructure.png
+  - title: Schedule configuration
+    url: https://raw.githubusercontent.com/KerberOps/headlamp-beacon/main/screenshots/schedule-tab.png
 annotations:
   headlamp/plugin/archive-url: https://github.com/KerberOps/headlamp-beacon/releases/download/v2.1.0/kerberops-headlamp-beacon-2.1.0.tar.gz
   headlamp/plugin/archive-checksum: "SHA256:18cd3af92520fb148f5c27a8ba8fb10c02664c357afd86fba4b6040bd137387c"
