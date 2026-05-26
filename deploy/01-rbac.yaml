@@ -28,6 +28,8 @@ rules:
   - apiGroups: [""]
     resources: ["configmaps"]
     resourceNames:
+      - beacon-apps-apps
+      - beacon-apps-versions
       - beacon-core-apps
       - beacon-core-versions
       - beacon-plugins-apps

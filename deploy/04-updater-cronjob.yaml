@@ -20,7 +20,8 @@ metadata:
     app.kubernetes.io/name: beacon
     app.kubernetes.io/component: updater
 spec:
-  schedule: "0 9 * * *"        # daily at 09:00 UTC — adjust to your timezone
+  schedule: "0 9 * * *"        # daily at 09:00 — adjust to your timezone
+  timeZone: UTC                 # change to your timezone, e.g. Europe/Lisbon
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
@@ -60,6 +61,10 @@ spec:
                   value: beacon-core-apps
                 - name: CORE_VERSIONS_CM
                   value: beacon-core-versions
+                - name: APPS_APPS_CM
+                  value: beacon-apps-apps
+                - name: APPS_VERSIONS_CM
+                  value: beacon-apps-versions
                 # Uncomment to avoid GitHub rate limits (60 req/h unauthenticated)
                 # - name: GITHUB_TOKEN
                 #   valueFrom:

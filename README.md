@@ -135,49 +135,7 @@ kubectl apply -f deploy/01-rbac.yaml
 
 ---
 
-### Step 3 — Configure what to monitor
-
-Two ConfigMaps define which deployments Beacon watches:
-
-| File | ConfigMap | Purpose |
-|---|---|---|
-| `deploy/02-plugins-configmap.yaml` | `beacon-plugins-apps` | Headlamp itself + installed plugins |
-| `deploy/03-core-configmap.yaml` | `beacon-core-apps` | Infrastructure deployments |
-
-Edit the `apps.json` entries to match your cluster's actual deployment names and namespaces, then apply:
-
-```bash
-kubectl apply -f deploy/02-plugins-configmap.yaml
-kubectl apply -f deploy/03-core-configmap.yaml
-```
-
-#### ConfigMap entry schema
-
-```jsonc
-{
-  "name": "Display name in the UI",
-  "currentVersion": {
-    "namespace": "the-namespace",       // Kubernetes namespace of the deployment
-    "deployment": "my-deployment",      // Deployment name
-    "container": "my-container",        // Container name (optional, defaults to first)
-    "initContainer": "my-init",         // Use instead of container for init containers
-    "vPrefix": true                     // Force "v" prefix on current version (for images that omit it)
-  },
-  "latestVersion": {
-    "type": "github-release",           // github-release | github-tag | ghcr-tag | manual
-    "repo": "owner/repo",               // GitHub repo (for github-release and github-tag)
-    "image": "owner/image",             // GHCR image path (for ghcr-tag)
-    "tagPrefix": "v",                   // Filter tags by this prefix
-    "stripPrefix": false,               // Whether to remove the prefix in the display
-    "releaseUrl": "https://...",        // URL opened when clicking the status badge
-    "value": "1.2.3"                    // Fixed version string (for type: manual)
-  }
-}
-```
-
----
-
-### Step 4 — Build and push the updater image
+### Step 3 — Build and push the updater image
 
 The updater is a Python script that fetches the latest versions and writes them to the ConfigMaps. Build it from source and push to any registry accessible from your cluster:
 
@@ -193,7 +151,7 @@ Then update the `image` field in `deploy/04-updater-cronjob.yaml` to point to yo
 
 ---
 
-### Step 5 — Deploy the updater CronJob
+### Step 4 — Deploy the updater CronJob
 
 ```bash
 kubectl apply -f deploy/04-updater-cronjob.yaml
@@ -203,7 +161,7 @@ The CronJob runs daily at 09:00 UTC by default. Change the `schedule` field to y
 
 ---
 
-### Step 6 — Run the updater immediately
+### Step 5 — Run the updater immediately
 
 Don't wait until tomorrow — trigger a first run now:
 
@@ -221,7 +179,7 @@ kubectl logs -f -l app.kubernetes.io/component=updater -n ops-headlamp
 
 ---
 
-### Step 7 — Install the Beacon plugin
+### Step 6 — Install the Beacon plugin
 
 Install via the Headlamp Plugin Catalog (search for **Beacon**), or manually:
 
@@ -229,7 +187,17 @@ Install via the Headlamp Plugin Catalog (search for **Beacon**), or manually:
 headlamp-plugin install @kerberops/headlamp-beacon
 ```
 
-Once installed, a **Beacon** entry appears in the Headlamp sidebar. The Infrastructure and Headlamp Plugins views will populate once the updater has run at least once.
+Once installed, a **Beacon** entry appears in the Headlamp sidebar.
+
+### Step 7 — Configure what to monitor (in the UI)
+
+No YAML editing required. Open Headlamp and go to **Beacon → Settings**:
+
+1. **Infrastructure tab** — Beacon scans the cluster for well-known components, shows what was detected, and lets you toggle each one on/off. Click **Save Configuration** and Beacon writes the ConfigMap automatically.
+2. **Headlamp Plugins tab** — Beacon reads your Headlamp deployment's init containers to detect installed plugins. Toggle and save.
+3. **Schedule tab** — adjust the daily version-fetch cron expression and timezone if needed.
+
+After saving, Beacon triggers an immediate version fetch and the monitoring views populate.
 
 ---
 
@@ -257,8 +225,8 @@ Adjust the `image` field in the `beacon-plugin` initContainer to point to your b
 ## Upgrading
 
 1. Update the `image` tag in `deploy/04-updater-cronjob.yaml` and re-apply.
-2. Update the plugin version in Headlamp via the Plugin Catalog.
-3. Re-apply any ConfigMap changes if the schema changed (check the [CHANGELOG](./CHANGELOG.md)).
+2. Update the plugin version in Headlamp via the Plugin Catalog (or rebuild and redeploy the init container image).
+3. Check the [CHANGELOG](./CHANGELOG.md) for any schema changes.
 
 ---
 
