@@ -1,6 +1,6 @@
 {
   "name": "@kerberops/headlamp-beacon",
-  "version": "2.0.8",
+  "version": "2.1.0",
   "description": "Monitor versions of Headlamp plugins, core infrastructure deployments, and business apps — with visual status badges and optional PDF email reports.",
   "license": "AGPL-3.0-only",
   "homepage": "https://github.com/KerberOps/headlamp-beacon",

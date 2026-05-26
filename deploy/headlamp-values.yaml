@@ -60,7 +60,7 @@ initContainers:
 
   # ── Beacon ──────────────────────────────────────────────────────────────────
   - name: beacon-plugin
-    image: ghcr.io/<your-org>/beacon-plugin:2.0.8   # replace with your image
+    image: ghcr.io/<your-org>/beacon-plugin:2.1.0   # replace with your image
     imagePullPolicy: Always
     securityContext:
       runAsUser: 0
