@@ -105,12 +105,22 @@ beacon-updater CronJob (this repo — updater/)
 
 ---
 
+## User Manual
+
+A full guide covering the first-steps setup flow, Settings configuration, and troubleshooting is available as a PDF:
+
+→ [Beacon Free — User Manual](./docs/customer/free/Beacon%20Free%20—%20User%20Manual.pdf)
+
+---
+
 ## Installation (Free Tier)
+
+> **Namespace note:** The manifests and examples in this guide use `ops-headlamp` as the target namespace — this is where Headlamp and Beacon are deployed in the reference setup. If your environment uses a different namespace, update the `namespace` field in all files under `deploy/` before applying them.
 
 ### Prerequisites
 
 - A running Kubernetes cluster
-- Headlamp deployed in your cluster (any namespace is fine)
+- Headlamp deployed in your cluster
 - `kubectl` configured with access to the cluster
 
 ---
