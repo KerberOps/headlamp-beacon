@@ -261,5 +261,9 @@ The **Applications** page and **Send Report** (on-demand PDF email reports) are 
 
 Copyright (C) 2026 KerberOps
 
-Licensed under the **GNU Affero General Public License v3.0** — see [LICENSE](./LICENSE).  
-Any modified version run over a network must make its source code available under the same license.
+This project is dual-licensed:
+
+- **Open source**: [GNU Affero General Public License v3.0](LICENSE) — free to use, modify, and distribute under the same terms. Any modified version run over a network must make its source code available under the same license.
+- **Commercial**: proprietary use, white-labelling, or closed-source modifications require a commercial license — contact **kerberops@outlook.com**
+
+Contributions are welcome. By opening a pull request you accept the [Contributor License Agreement](CLA.md).
