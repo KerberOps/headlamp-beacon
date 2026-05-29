@@ -1,0 +1,495 @@
+# Beacon Security Scanner
+#
+# Scans beacon component images daily with the latest Trivy and stores results
+# in the beacon-security-scan ConfigMap, displayed in the Settings > Security tab.
+#
+# Architecture (3-step Job):
+#   1. discover  — reads cluster to find currently deployed beacon image refs
+#   2. trivy     — aquasec/trivy:latest (always pulled fresh) scans each image
+#   3. publish   — formats trivy JSON output and patches beacon-security-scan CM
+#
+# For private registries (ACR), create a beacon-scanner-config ConfigMap with
+# key "acr" set to the registry FQDN. The scanner authenticates via Azure Node MSI.
+# See customizations/aet/07-scanner.yaml for an example.
+#
+# Apply:   kubectl apply -f 07-scanner.yaml
+# Run now: kubectl create job --from=cronjob/beacon-scanner scan-now-$(date +%s) -n ops-headlamp
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: beacon-scanner
+  namespace: ops-headlamp
+  labels:
+    app.kubernetes.io/name: beacon
+    app.kubernetes.io/component: scanner
+    app.kubernetes.io/part-of: headlamp
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: beacon-scanner
+  namespace: ops-headlamp
+  labels:
+    app.kubernetes.io/name: beacon
+    app.kubernetes.io/component: scanner
+    app.kubernetes.io/part-of: headlamp
+rules:
+  - apiGroups: [apps]
+    resources: [deployments]
+    resourceNames: [headlamp]
+    verbs: [get]
+  - apiGroups: [batch]
+    resources: [cronjobs]
+    resourceNames: [beacon-updater, beacon-reporter-daily]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [beacon-security-scan]
+    verbs: [get, update, patch]
+  # create cannot be restricted by resourceName (k8s limitation)
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: beacon-scanner
+  namespace: ops-headlamp
+  labels:
+    app.kubernetes.io/name: beacon
+    app.kubernetes.io/component: scanner
+    app.kubernetes.io/part-of: headlamp
+subjects:
+  - kind: ServiceAccount
+    name: beacon-scanner
+    namespace: ops-headlamp
+roleRef:
+  kind: Role
+  name: beacon-scanner
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: beacon-scanner-scripts
+  namespace: ops-headlamp
+  labels:
+    app.kubernetes.io/name: beacon
+    app.kubernetes.io/component: scanner
+    app.kubernetes.io/part-of: headlamp
+data:
+  # ── Step 1: Discover currently deployed beacon image refs from the cluster ──
+  discover.py: |
+    #!/usr/bin/env python3
+    import json, os, ssl, sys, urllib.request
+    from pathlib import Path
+
+    NS      = os.environ.get("NAMESPACE", "ops-headlamp")
+    K8S     = "https://kubernetes.default.svc"
+    TOKEN   = Path("/var/run/secrets/kubernetes.io/serviceaccount/token").read_text().strip()
+    CA      = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+    OUTDIR  = os.environ.get("CONFIG_DIR", "/config")
+
+    def k8s_get(path):
+        ctx = ssl.create_default_context(cafile=CA)
+        req = urllib.request.Request(f"{K8S}{path}",
+            headers={"Authorization": f"Bearer {TOKEN}", "Accept": "application/json"})
+        try:
+            with urllib.request.urlopen(req, context=ctx, timeout=10) as r:
+                return json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            print(f"HTTP {e.code} fetching {path}: {e.read().decode()}", file=sys.stderr)
+            return {}
+        except Exception as e:
+            print(f"Error fetching {path}: {e}", file=sys.stderr)
+            return {}
+
+    print("==> Discovering beacon image versions from cluster...")
+
+    headlamp = k8s_get(f"/apis/apps/v1/namespaces/{NS}/deployments/headlamp")
+    init_containers = (headlamp.get("spec",{}).get("template",{})
+                               .get("spec",{}).get("initContainers",[]))
+    plugin_image = next(
+        (c["image"] for c in init_containers if "beacon-plugin" in c.get("name","")), "")
+
+    updater_cj = k8s_get(f"/apis/batch/v1/namespaces/{NS}/cronjobs/beacon-updater")
+    updater_image = (updater_cj.get("spec",{}).get("jobTemplate",{}).get("spec",{})
+                               .get("template",{}).get("spec",{}).get("containers",[{}])[0]
+                               .get("image",""))
+
+    reporter_cj = k8s_get(f"/apis/batch/v1/namespaces/{NS}/cronjobs/beacon-reporter-daily")
+    reporter_image = (reporter_cj.get("spec",{}).get("jobTemplate",{}).get("spec",{})
+                                 .get("template",{}).get("spec",{}).get("containers",[{}])[0]
+                                 .get("image",""))
+
+    print(f"  beacon-plugin:   {plugin_image or '(not found)'}")
+    print(f"  beacon-updater:  {updater_image or '(not found)'}")
+    print(f"  beacon-reporter: {reporter_image or '(not found)'}")
+
+    Path(OUTDIR).mkdir(parents=True, exist_ok=True)
+    Path(f"{OUTDIR}/images.env").write_text(
+        f"BEACON_PLUGIN_IMAGE={plugin_image}\n"
+        f"BEACON_UPDATER_IMAGE={updater_image}\n"
+        f"BEACON_REPORTER_IMAGE={reporter_image}\n"
+    )
+    print("==> Written to images.env")
+
+  # ── Step 2: Run Trivy against each image ──────────────────────────────────
+  scan.sh: |
+    #!/bin/sh
+    set -e
+
+    CONFIG_DIR="${CONFIG_DIR:-/config}"
+    RESULTS_DIR="${RESULTS_DIR:-/results}"
+
+    echo "=============================================="
+    echo "  Beacon Security Scanner — Trivy"
+    echo "=============================================="
+
+    if [ ! -f "${CONFIG_DIR}/images.env" ]; then
+      echo "ERROR: ${CONFIG_DIR}/images.env not found (discovery step failed?)"
+      exit 1
+    fi
+    . "${CONFIG_DIR}/images.env"
+
+    TRIVY_VER=$(trivy --version | head -1 | awk '{print $2}')
+    echo "Trivy:           ${TRIVY_VER}"
+    echo "beacon-plugin:   ${BEACON_PLUGIN_IMAGE}"
+    echo "beacon-updater:  ${BEACON_UPDATER_IMAGE}"
+    echo "beacon-reporter: ${BEACON_REPORTER_IMAGE}"
+    echo "${TRIVY_VER}" > "${RESULTS_DIR}/trivy-version.txt"
+
+    # Authenticate to private ACR via Azure Node MSI (IMDS)
+    if [ -n "${ACR}" ]; then
+      echo ""
+      echo "==> Authenticating to ${ACR} via Azure Node MSI (IMDS)..."
+      AAD_TOKEN=$(wget -qO- --header "Metadata:true" \
+        "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://management.azure.com/" \
+        | sed 's/.*"access_token":"\([^"]*\)".*/\1/')
+      if [ -z "${AAD_TOKEN}" ]; then echo "ERROR: Failed to get AAD token"; exit 1; fi
+
+      ACR_TOKEN=$(wget -qO- \
+        --post-data "grant_type=access_token&service=${ACR}&access_token=${AAD_TOKEN}" \
+        "https://${ACR}/oauth2/exchange" \
+        | sed 's/.*"refresh_token":"\([^"]*\)".*/\1/')
+      if [ -z "${ACR_TOKEN}" ]; then echo "ERROR: Failed to get ACR token"; exit 1; fi
+
+      export TRIVY_USERNAME="00000000-0000-0000-0000-000000000000"
+      export TRIVY_PASSWORD="${ACR_TOKEN}"
+      echo "ACR authentication successful"
+    fi
+
+    scan_image() {
+      local image="$1" name="$2"
+      [ -z "$image" ] && echo "SKIP $name (no image found)" && return
+      echo ""
+      echo "==> Scanning ${name}: ${image}"
+      trivy image --format json --no-progress --quiet \
+        "${image}" > "${RESULTS_DIR}/${name}.json" 2>"${RESULTS_DIR}/${name}.err" \
+        && echo "    OK" \
+        || { echo "    WARN: scan failed"; cat "${RESULTS_DIR}/${name}.err" >&2; }
+    }
+
+    scan_image "${BEACON_PLUGIN_IMAGE}"  "beacon-plugin"
+    scan_image "${BEACON_UPDATER_IMAGE}" "beacon-updater"
+    scan_image "${BEACON_REPORTER_IMAGE}" "beacon-reporter"
+
+    echo ""
+    echo "==> All scans complete"
+
+  # ── Step 3: Format results and patch ConfigMap ────────────────────────────
+  publish.py: |
+    #!/usr/bin/env python3
+    import json, os, ssl, sys, urllib.request
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    NS          = os.environ.get("NAMESPACE", "ops-headlamp")
+    CM_NAME     = "beacon-security-scan"
+    RESULTS_DIR = Path(os.environ.get("RESULTS_DIR", "/results"))
+    K8S         = "https://kubernetes.default.svc"
+    TOKEN       = Path("/var/run/secrets/kubernetes.io/serviceaccount/token").read_text().strip()
+    CA          = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+
+    def k8s_req(method, path, body=None):
+        ctx  = ssl.create_default_context(cafile=CA)
+        data = json.dumps(body).encode() if body else None
+        ct   = "application/merge-patch+json" if method == "PATCH" else "application/json"
+        req  = urllib.request.Request(f"{K8S}{path}", data=data, method=method,
+               headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": ct, "Accept": "application/json"})
+        try:
+            with urllib.request.urlopen(req, context=ctx, timeout=15) as r:
+                return json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            if e.code == 404 and method == "GET": return None
+            raise RuntimeError(f"HTTP {e.code} {method} {path}: {e.read().decode()}") from e
+
+    def severities(data):
+        c = {"CRITICAL":0,"HIGH":0,"MEDIUM":0,"LOW":0,"UNKNOWN":0}
+        for r in data.get("Results",[]):
+            for v in r.get("Vulnerabilities") or []:
+                s = v.get("Severity","UNKNOWN").upper()
+                c[s] = c.get(s,0) + 1
+        return c
+
+    def vulnerabilities(data):
+        sev_order = {"CRITICAL":0,"HIGH":1,"MEDIUM":2,"LOW":3,"UNKNOWN":4}
+        vulns = []
+        for r in data.get("Results",[]):
+            for v in r.get("Vulnerabilities") or []:
+                vulns.append({
+                    "id":        v.get("VulnerabilityID",""),
+                    "pkgName":   v.get("PkgName",""),
+                    "installed": v.get("InstalledVersion",""),
+                    "fixed":     v.get("FixedVersion","") or "",
+                    "severity":  v.get("Severity","UNKNOWN").upper(),
+                    "title":     (v.get("Title") or v.get("Description") or "")[:120],
+                })
+        vulns.sort(key=lambda v: (sev_order.get(v["severity"],4), v["pkgName"]))
+        return vulns
+
+    def pkg_count(data):
+        return sum(len(r.get("Packages") or []) for r in data.get("Results",[]))
+
+    def os_info(data):
+        o = data.get("Metadata",{}).get("OS",{})
+        return f"{o.get('Family','')} {o.get('Name','')}".strip() or "unknown"
+
+    def base_image(data):
+        """Detect Docker base image: python:X.Y.Z-alpine when built on python:N-alpine, else os family:version."""
+        env = (data.get("Metadata",{})
+                   .get("ImageConfig",{})
+                   .get("config",{})
+                   .get("Env") or [])
+        for e in env:
+            if e.startswith("PYTHON_VERSION="):
+                py_ver = e.split("=",1)[1]
+                o = data.get("Metadata",{}).get("OS",{})
+                family = o.get("Family","")
+                return f"python:{py_ver}-{family}" if family else f"python:{py_ver}"
+        o = data.get("Metadata",{}).get("OS",{})
+        family, name = o.get("Family",""), o.get("Name","")
+        return f"{family}:{name}".strip(":") if family else "unknown"
+
+    def digest(data):
+        ds = data.get("Metadata",{}).get("RepoDigests",[])
+        if ds: return ds[0].split("@")[-1] if "@" in ds[0] else ds[0]
+        return data.get("Metadata",{}).get("ImageID","")
+
+    print("==> Reading scan results...")
+    trivy_ver = (RESULTS_DIR/"trivy-version.txt").read_text().strip() \
+                if (RESULTS_DIR/"trivy-version.txt").exists() else "unknown"
+    print(f"    Trivy: {trivy_ver}")
+
+    images, errors = [], {}
+    for name in ["beacon-plugin", "beacon-updater", "beacon-reporter"]:
+        jf = RESULTS_DIR / f"{name}.json"
+        if not jf.exists():
+            print(f"    SKIP {name}: no result file")
+            continue
+        try:
+            raw = json.loads(jf.read_text())
+            if not raw: raise ValueError("empty")
+            sev = severities(raw)
+            images.append({
+                "name": name, "image": raw.get("ArtifactName", name),
+                "digest": digest(raw), "os": os_info(raw),
+                "baseImage": base_image(raw),
+                "packageCount": pkg_count(raw), "severity": sev,
+                "vulnerabilities": vulnerabilities(raw),
+                "scanStatus": "success",
+            })
+            tag = raw.get("ArtifactName","").split(":")[-1]
+            clean = "✓" if sev["CRITICAL"]==0 and sev["HIGH"]==0 else "⚠"
+            print(f"    {clean} {name}:{tag}  C:{sev['CRITICAL']} H:{sev['HIGH']} M:{sev['MEDIUM']} L:{sev['LOW']}")
+        except Exception as e:
+            errors[name] = str(e)
+            images.append({"name":name,"image":name,"digest":"","os":"unknown",
+                "packageCount":0,"severity":{"CRITICAL":0,"HIGH":0,"MEDIUM":0,"LOW":0,"UNKNOWN":0},
+                "scanStatus":"error","scanError":str(e)})
+
+    payload = {
+        "lastScan": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "trivyVersion": trivy_ver,
+        "images": images, "scanErrors": errors,
+    }
+    labels = {"app.kubernetes.io/name":"beacon","app.kubernetes.io/component":"security-scan",
+              "app.kubernetes.io/part-of":"headlamp"}
+
+    print(f"==> Writing ConfigMap {CM_NAME}...")
+    if k8s_req("GET", f"/api/v1/namespaces/{NS}/configmaps/{CM_NAME}"):
+        k8s_req("PATCH", f"/api/v1/namespaces/{NS}/configmaps/{CM_NAME}",
+                {"data":{"scan.json": json.dumps(payload, indent=2)}})
+        print("    Updated")
+    else:
+        k8s_req("POST", f"/api/v1/namespaces/{NS}/configmaps",
+                {"apiVersion":"v1","kind":"ConfigMap",
+                 "metadata":{"name":CM_NAME,"namespace":NS,"labels":labels},
+                 "data":{"scan.json": json.dumps(payload, indent=2)}})
+        print("    Created")
+
+    if errors:
+        print(f"\nScan errors: {errors}", file=sys.stderr)
+        sys.exit(1)
+    print("==> Done")
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: beacon-scanner
+  namespace: ops-headlamp
+  labels:
+    app.kubernetes.io/name: beacon
+    app.kubernetes.io/component: scanner
+    app.kubernetes.io/part-of: headlamp
+spec:
+  schedule: "0 8 * * *"         # 08:00 daily — before beacon-updater at 09:00
+  timeZone: Europe/Lisbon
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: beacon
+            app.kubernetes.io/component: scanner
+        spec:
+          serviceAccountName: beacon-scanner
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+
+          initContainers:
+
+            # Step 1 — discover which beacon images are currently deployed
+            - name: discover
+              image: python:3.12-alpine
+              command: [python3, /scripts/discover.py]
+              env:
+                - name: NAMESPACE
+                  value: ops-headlamp
+                - name: PYTHONDONTWRITEBYTECODE
+                  value: "1"
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: {drop: [ALL]}
+              resources:
+                requests: {cpu: 50m, memory: 32Mi}
+                limits:   {cpu: 100m, memory: 64Mi}
+              volumeMounts:
+                - {name: scripts, mountPath: /scripts}
+                - {name: config,  mountPath: /config}
+
+            # Step 2 — scan with latest Trivy (always pulled fresh)
+            - name: trivy-scanner
+              image: aquasec/trivy:latest
+              imagePullPolicy: Always
+              command: [sh, /scripts/scan.sh]
+              env:
+                - name: ACR
+                  valueFrom:
+                    configMapKeyRef:
+                      name: beacon-scanner-config
+                      key: acr
+                      optional: true   # omitted when CM doesn't exist (public registries)
+              # trivy needs write access to download its DB and extract layers
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: false
+                runAsUser: 0
+              resources:
+                requests: {cpu: 200m, memory: 512Mi}
+                limits:   {cpu: 500m, memory: 1Gi}
+              volumeMounts:
+                - {name: scripts,      mountPath: /scripts, readOnly: true}
+                - {name: config,       mountPath: /config,  readOnly: true}
+                - {name: results,      mountPath: /results}
+                - {name: trivy-cache,  mountPath: /root/.cache/trivy}
+                - {name: trivy-tmp,    mountPath: /tmp}
+
+          containers:
+
+            # Step 3 — publish results to ConfigMap
+            - name: publish
+              image: python:3.12-alpine
+              command: [python3, /scripts/publish.py]
+              env:
+                - name: NAMESPACE
+                  value: ops-headlamp
+                - name: PYTHONDONTWRITEBYTECODE
+                  value: "1"
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: {drop: [ALL]}
+              resources:
+                requests: {cpu: 50m, memory: 32Mi}
+                limits:   {cpu: 100m, memory: 64Mi}
+              volumeMounts:
+                - {name: scripts, mountPath: /scripts, readOnly: true}
+                - {name: results, mountPath: /results, readOnly: true}
+
+          volumes:
+            - name: scripts
+              configMap:
+                name: beacon-scanner-scripts
+            - name: config
+              emptyDir: {}
+            - name: results
+              emptyDir: {}
+            - name: trivy-cache
+              emptyDir: {}
+            - name: trivy-tmp
+              emptyDir: {}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: beacon-scanner-egress
+  namespace: ops-headlamp
+  labels:
+    app.kubernetes.io/name: beacon
+    app.kubernetes.io/component: scanner
+    app.kubernetes.io/part-of: headlamp
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: beacon
+      app.kubernetes.io/component: scanner
+  policyTypes: [Egress]
+  egress:
+    # Kubernetes API server (discover + publish steps)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - {protocol: TCP, port: 443}
+    # Azure IMDS — MSI token for ACR authentication
+    - to:
+        - ipBlock: {cidr: 169.254.169.254/32}
+      ports:
+        - {protocol: TCP, port: 80}
+    # External HTTPS: ACR, Trivy DB (ghcr.io), public registries
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
+      ports:
+        - {protocol: TCP, port: 443}
+    # DNS
+    - ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}

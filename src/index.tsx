@@ -43,6 +43,35 @@ interface VersionsCache {
 
 type LicenseLevel = 'free' | 'pro' | 'enterprise';
 
+interface VulnEntry {
+  id: string;
+  pkgName: string;
+  installed: string;
+  fixed: string;
+  severity: string;
+  title: string;
+}
+
+interface ImageScanResult {
+  name: string;
+  image: string;
+  digest: string;
+  os: string;
+  baseImage?: string;
+  packageCount: number;
+  severity: { CRITICAL: number; HIGH: number; MEDIUM: number; LOW: number; UNKNOWN: number };
+  vulnerabilities?: VulnEntry[];
+  scanStatus: 'success' | 'error';
+  scanError?: string;
+}
+
+interface SecurityScanData {
+  lastScan: string;
+  trivyVersion: string;
+  images: ImageScanResult[];
+  scanErrors: Record<string, string>;
+}
+
 // ─── Utility ──────────────────────────────────────────────────────────────────
 
 function extractImageTag(image: string): string {
@@ -87,24 +116,47 @@ function useLicenseLevel(): { level: LicenseLevel; domain: string } {
 // ─── Status ───────────────────────────────────────────────────────────────────
 
 const STATUS_STYLES = {
-  outdated: { background: 'rgba(255,152,0,0.2)',   color: '#ffb74d', border: '1px solid rgba(255,152,0,0.5)'   },
-  upToDate: { background: 'rgba(76,175,80,0.2)',   color: '#81c784', border: '1px solid rgba(76,175,80,0.5)'   },
-  error:    { background: 'rgba(244,67,54,0.2)',   color: '#ef9a9a', border: '1px solid rgba(244,67,54,0.5)'   },
-  unknown:  { background: 'rgba(158,158,158,0.2)', color: '#bdbdbd', border: '1px solid rgba(158,158,158,0.5)' },
-} as const;
+  outdated: {
+    background: (t: any) => t.palette.mode === 'dark' ? 'rgba(255,152,0,0.2)'   : 'rgba(255,152,0,0.12)',
+    color:      (t: any) => t.palette.mode === 'dark' ? '#ffb74d'               : '#e65100',
+    border:     (t: any) => `1px solid ${t.palette.mode === 'dark' ? 'rgba(255,152,0,0.5)' : 'rgba(230,81,0,0.55)'}`,
+  },
+  upToDate: {
+    background: (t: any) => t.palette.mode === 'dark' ? 'rgba(76,175,80,0.2)'   : 'rgba(76,175,80,0.12)',
+    color:      (t: any) => t.palette.mode === 'dark' ? '#81c784'               : '#2e7d32',
+    border:     (t: any) => `1px solid ${t.palette.mode === 'dark' ? 'rgba(76,175,80,0.5)' : 'rgba(46,125,50,0.55)'}`,
+  },
+  error: {
+    background: (t: any) => t.palette.mode === 'dark' ? 'rgba(244,67,54,0.2)'   : 'rgba(244,67,54,0.12)',
+    color:      (t: any) => t.palette.mode === 'dark' ? '#ef9a9a'               : '#c62828',
+    border:     (t: any) => `1px solid ${t.palette.mode === 'dark' ? 'rgba(244,67,54,0.5)' : 'rgba(198,40,40,0.55)'}`,
+  },
+  unknown: {
+    background: (t: any) => t.palette.mode === 'dark' ? 'rgba(158,158,158,0.2)' : 'rgba(158,158,158,0.1)',
+    color:      (t: any) => t.palette.mode === 'dark' ? t.palette.text.secondary : '#546e7a',
+    border:     (t: any) => `1px solid ${t.palette.mode === 'dark' ? 'rgba(158,158,158,0.5)' : 'rgba(84,110,122,0.45)'}`,
+  },
+};
 type StatusKind = keyof typeof STATUS_STYLES;
 const ALL_STATUS_FILTERS: StatusKind[] = ['upToDate', 'outdated', 'error', 'unknown'];
 const STATUS_FILTER_LABELS: Record<StatusKind, string> = { upToDate: '✓ Up to Date', outdated: '⚠️ Update Available', error: '✗ Error', unknown: '? Unknown' };
 
+const NS_CHIP_SX = {
+  background: (t: any) => t.palette.mode === 'dark' ? 'rgba(100,149,237,0.15)' : 'rgba(25,118,210,0.12)',
+  color:      (t: any) => t.palette.mode === 'dark' ? '#90caf9'                : '#1565c0',
+  border:     (t: any) => `1px solid ${t.palette.mode === 'dark' ? 'rgba(100,149,237,0.3)' : 'rgba(21,101,192,0.35)'}`,
+  fontSize: '11px', fontFamily: 'monospace',
+};
+
 function StatusBadge({ kind, label, tooltip, href }: { kind: StatusKind; label: string; tooltip?: string; href?: string | null }) {
-  const sx = { ...STATUS_STYLES[kind], p: '4px 10px', borderRadius: '4px', fontWeight: 600, fontSize: '12px', display: 'inline-block', ...(href ? { cursor: 'pointer', textDecoration: 'none', '&:hover': { filter: 'brightness(1.3)', textDecoration: 'underline' } } : {}) };
+  const sx = { ...STATUS_STYLES[kind], p: '4px 10px', borderRadius: '6px', fontWeight: 400, fontSize: '12px', display: 'inline-block', ...(href ? { cursor: 'pointer', textDecoration: 'none', '&:hover': { filter: 'brightness(1.1)', textDecoration: 'underline' } } : {}) };
   const badge = href ? <Typography component="a" href={href} target="_blank" rel="noopener noreferrer" sx={sx}>{label} ↗</Typography> : <Typography component="span" sx={sx}>{label}</Typography>;
   return tooltip ? <Tooltip title={tooltip}>{badge}</Tooltip> : badge;
 }
 
 // ─── Filter header ────────────────────────────────────────────────────────────
 
-interface FilterHeaderProps<T extends string> { label: string; allOptions: T[]; activeFilters: T[]; onFiltersChange: (f: T[]) => void; renderOption: (o: T) => React.ReactNode; getOptionColor?: (o: T) => string; }
+interface FilterHeaderProps<T extends string> { label: string; allOptions: T[]; activeFilters: T[]; onFiltersChange: (f: T[]) => void; renderOption: (o: T) => React.ReactNode; getOptionColor?: (o: T) => any; }
 function FilterHeader<T extends string>({ label, allOptions, activeFilters, onFiltersChange, renderOption, getOptionColor }: FilterHeaderProps<T>) {
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const open = Boolean(anchorEl);
@@ -112,17 +164,52 @@ function FilterHeader<T extends string>({ label, allOptions, activeFilters, onFi
   const toggleFilter = (o: T) => { if (activeFilters.includes(o)) { if (activeFilters.length > 1) onFiltersChange(activeFilters.filter(f => f !== o)); } else onFiltersChange([...activeFilters, o]); };
   return (
     <>
-      <Box onClick={e => setAnchorEl(e.currentTarget as HTMLElement)} sx={{ display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: 'pointer', fontWeight: 600, color: isFiltered ? '#ffb74d' : '#fff', userSelect: 'none', '&:hover': { opacity: 0.8 } }}>
+      <Box onClick={e => setAnchorEl(e.currentTarget as HTMLElement)} sx={{ display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: 'pointer', fontWeight: 600, color: isFiltered ? '#ffb74d' : 'text.primary', userSelect: 'none', '&:hover': { opacity: 0.8 } }}>
         {label}<Typography component="span" sx={{ fontSize: '11px', opacity: 0.7 }}>{isFiltered ? ` (${activeFilters.length}/${allOptions.length})` : ' ▾'}</Typography>
       </Box>
-      <Popover open={open} anchorEl={anchorEl} onClose={() => setAnchorEl(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }} transformOrigin={{ vertical: 'top', horizontal: 'left' }} PaperProps={{ sx: { background: '#1e1e1e', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '8px', p: '8px 4px', minWidth: '220px', maxHeight: '320px', overflowY: 'auto' } }}>
-        <Typography sx={{ px: 2, pb: 1, fontSize: '11px', color: '#888', letterSpacing: '0.05em', textTransform: 'uppercase' }}>Filter by {label.toLowerCase()}</Typography>
-        <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)', mb: 1 }} />
-        {allOptions.map(o => (<Box key={o} sx={{ px: 1 }}><FormControlLabel control={<Checkbox checked={activeFilters.includes(o)} onChange={() => toggleFilter(o)} size="small" sx={{ color: getOptionColor?.(o) ?? '#bdbdbd', '&.Mui-checked': { color: getOptionColor?.(o) ?? '#bdbdbd' } }} />} label={<Typography sx={{ fontSize: '13px', fontWeight: 500, color: getOptionColor?.(o) ?? '#ccc' }}>{renderOption(o)}</Typography>} sx={{ width: '100%', m: 0, borderRadius: '4px', '&:hover': { background: 'rgba(255,255,255,0.05)' } }} /></Box>))}
-        {isFiltered && (<><Divider sx={{ borderColor: 'rgba(255,255,255,0.1)', mt: 1, mb: 1 }} /><Box sx={{ px: 1 }}><Typography onClick={() => { onFiltersChange([...allOptions]); setAnchorEl(null); }} sx={{ fontSize: '12px', color: '#888', cursor: 'pointer', px: 1, py: 0.5, borderRadius: '4px', '&:hover': { color: '#fff', background: 'rgba(255,255,255,0.05)' } }}>↺ Reset to all</Typography></Box></>)}
+      <Popover open={open} anchorEl={anchorEl} onClose={() => setAnchorEl(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }} transformOrigin={{ vertical: 'top', horizontal: 'left' }} PaperProps={{ sx: { bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider', borderRadius: '8px', p: '8px 4px', minWidth: '220px', maxHeight: '320px', overflowY: 'auto' } }}>
+        <Typography sx={{ px: 2, pb: 1, fontSize: '11px', color: 'text.secondary', letterSpacing: '0.05em', textTransform: 'uppercase' }}>Filter by {label.toLowerCase()}</Typography>
+        <Divider sx={{ borderColor: 'divider', mb: 1 }} />
+        {allOptions.map(o => (<Box key={o} sx={{ px: 1 }}><FormControlLabel control={<Checkbox checked={activeFilters.includes(o)} onChange={() => toggleFilter(o)} size="small" sx={{ color: getOptionColor?.(o) ?? 'text.secondary', '&.Mui-checked': { color: getOptionColor?.(o) ?? 'text.secondary' } }} />} label={<Typography sx={{ fontSize: '13px', fontWeight: 500, color: getOptionColor?.(o) ?? 'text.primary' }}>{renderOption(o)}</Typography>} sx={{ width: '100%', m: 0, borderRadius: '4px', '&:hover': { bgcolor: 'action.hover' } }} /></Box>))}
+        {isFiltered && (<><Divider sx={{ borderColor: 'divider', mt: 1, mb: 1 }} /><Box sx={{ px: 1 }}><Typography onClick={() => { onFiltersChange([...allOptions]); setAnchorEl(null); }} sx={{ fontSize: '12px', color: 'text.secondary', cursor: 'pointer', px: 1, py: 0.5, borderRadius: '4px', '&:hover': { color: 'text.primary', bgcolor: 'action.hover' } }}>↺ Reset to all</Typography></Box></>)}
       </Popover>
     </>
   );
+}
+
+// ─── Security scan hook ───────────────────────────────────────────────────────
+
+function useSecurityScan(): { data: SecurityScanData | null; loading: boolean } {
+  const ConfigMap = (K8s as any).ResourceClasses.ConfigMap;
+  const [cm, cmError] = ConfigMap.useGet('beacon-security-scan', 'ops-headlamp');
+  if (!cm) return { data: null, loading: !cmError };
+  const { value } = parseConfigMapValue<SecurityScanData>(cm, 'scan.json', null as any);
+  return { data: value, loading: false };
+}
+
+function useScannerSchedule(): { schedule: string; timeZone: string } | null {
+  const CronJob = (K8s as any).ResourceClasses.CronJob;
+  const [cj] = CronJob.useGet('beacon-scanner', 'ops-headlamp');
+  if (!cj) return null;
+  const schedule = cj.jsonData?.spec?.schedule ?? cj.spec?.schedule ?? null;
+  const timeZone = cj.jsonData?.spec?.timeZone ?? cj.spec?.timeZone ?? null;
+  return schedule ? { schedule, timeZone: timeZone ?? '' } : null;
+}
+
+function parseCronHuman(expr: string, tz?: string): string {
+  const p = expr.trim().split(/\s+/);
+  if (p.length !== 5) return expr;
+  const [min, hour, dom, month, dow] = p;
+  const suffix = tz ? ` (${tz})` : '';
+  if (dom === '*' && month === '*') {
+    if (dow === '*' && min !== '*' && hour !== '*') {
+      const h = parseInt(hour), m = parseInt(min);
+      const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+      const ap = h < 12 ? 'AM' : 'PM';
+      return `Every day at ${h12}:${m.toString().padStart(2,'0')} ${ap}${suffix}`;
+    }
+  }
+  return expr + suffix;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -135,10 +222,10 @@ function parseConfigMapValue<T>(cm: any, key: string, fallback: T): { value: T; 
   catch (e: any) { return { value: fallback, error: `Failed to parse ${key}: ${e?.message ?? e}` }; }
 }
 
-const darkFieldSx = {
-  '& .MuiOutlinedInput-root': { color: '#fff', '& fieldset': { borderColor: 'rgba(255,255,255,0.2)' }, '&:hover fieldset': { borderColor: 'rgba(255,255,255,0.35)' }, '&.Mui-focused fieldset': { borderColor: '#f5c518' } },
-  '& .MuiInputLabel-root': { color: '#888' }, '& .MuiInputLabel-root.Mui-focused': { color: '#f5c518' },
-  '& .MuiFormHelperText-root': { color: '#555' },
+const fieldSx = {
+  '& .MuiOutlinedInput-root': { '& fieldset': { borderColor: 'divider' }, '&:hover fieldset': { borderColor: 'text.secondary' }, '&.Mui-focused fieldset': { borderColor: '#f5c518' } },
+  '& .MuiInputLabel-root': { color: 'text.secondary' }, '& .MuiInputLabel-root.Mui-focused': { color: '#f5c518' },
+  '& .MuiFormHelperText-root': { color: 'text.disabled' },
 };
 
 // ─── Save utilities ───────────────────────────────────────────────────────────
@@ -178,10 +265,10 @@ async function triggerUpdater(): Promise<void> {
 
 function FirstRunCard({ section, tabLabel }: { section: string; tabLabel: string }) {
   return (
-    <Paper sx={{ p: 5, textAlign: 'center', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: '12px' }}>
+    <Paper sx={{ p: 5, textAlign: 'center', bgcolor: 'action.hover', border: '1px solid', borderColor: 'divider', borderRadius: '12px' }}>
       <Typography sx={{ fontSize: '32px', mb: 2 }}>🔭</Typography>
-      <Typography variant="h6" sx={{ color: '#ccc', fontWeight: 600, mb: 1.5 }}>{section} not configured yet</Typography>
-      <Typography variant="body2" sx={{ color: '#555', maxWidth: 420, mx: 'auto', lineHeight: 1.8, mb: 3 }}>
+      <Typography variant="h6" sx={{ color: 'text.primary', fontWeight: 600, mb: 1.5 }}>{section} not configured yet</Typography>
+      <Typography variant="body2" sx={{ color: 'text.disabled', maxWidth: 420, mx: 'auto', lineHeight: 1.8, mb: 3 }}>
         Beacon hasn't scanned your cluster for {section.toLowerCase()} yet.<br />
         Open <strong style={{ color: '#f5c518' }}>Settings → {tabLabel}</strong> to scan, select what you want to monitor, and save.
       </Typography>
@@ -199,19 +286,19 @@ interface CatalogueEntry { name: string; namespace: string; deployment: string; 
 interface DiscoveredInfra extends CatalogueEntry { found: boolean; }
 
 const INFRA_CATALOGUE: CatalogueEntry[] = [
-  { name: 'Argo CD',             namespace: 'argocd',              deployment: 'argocd-server',                                     latestVersion: { type: 'github-tag', repo: 'argoproj/argo-cd',                       tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/argoproj/argo-cd/releases'                    } },
-  { name: 'cert-manager',        namespace: 'cert-manager',         deployment: 'cert-manager',                                      latestVersion: { type: 'github-tag', repo: 'cert-manager/cert-manager',               tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/cert-manager/cert-manager/releases'            } },
-  { name: 'Envoy Gateway',       namespace: 'envoy-gateway-system', deployment: 'envoy-gateway',       container: 'envoy-gateway',   latestVersion: { type: 'github-tag', repo: 'envoyproxy/gateway',                      tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/envoyproxy/gateway/releases'                   } },
-  { name: 'External DNS',        namespace: 'external-dns',         deployment: 'external-dns',                                      latestVersion: { type: 'github-tag', repo: 'kubernetes-sigs/external-dns',            tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/kubernetes-sigs/external-dns/releases'         } },
-  { name: 'External Secrets',    namespace: 'external-secrets',     deployment: 'external-secrets',                                  latestVersion: { type: 'github-tag', repo: 'external-secrets/external-secrets',       tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/external-secrets/external-secrets/releases'    } },
-  { name: 'Flux',                namespace: 'flux-system',          deployment: 'source-controller',                                 latestVersion: { type: 'github-tag', repo: 'fluxcd/flux2',                            tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/fluxcd/flux2/releases'                         } },
-  { name: 'ingress-nginx',       namespace: 'ingress-nginx',        deployment: 'ingress-nginx-controller',                          latestVersion: { type: 'github-tag', repo: 'kubernetes/ingress-nginx',                tagPrefix: 'controller-v', stripPrefix: false, releaseUrl: 'https://github.com/kubernetes/ingress-nginx/releases'        } },
-  { name: 'Kube State Metrics',  namespace: 'monitoring',           deployment: 'kube-state-metrics',                                latestVersion: { type: 'github-tag', repo: 'kubernetes/kube-state-metrics',           tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/kubernetes/kube-state-metrics/releases'        } },
-  { name: 'Metrics Server',      namespace: 'kube-system',          deployment: 'metrics-server',                                    latestVersion: { type: 'github-tag', repo: 'kubernetes-sigs/metrics-server',          tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/kubernetes-sigs/metrics-server/releases'       } },
-  { name: 'Prometheus Operator', namespace: 'monitoring',           deployment: 'prometheus-operator',                               latestVersion: { type: 'github-tag', repo: 'prometheus-operator/prometheus-operator', tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/prometheus-operator/prometheus-operator/releases' } },
-  { name: 'Reloader',            namespace: 'reloader',             deployment: 'reloader-reloader',   container: 'reloader-reloader', latestVersion: { type: 'github-tag', repo: 'stakater/Reloader',                   tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/stakater/Reloader/releases'                   } },
-  { name: 'Sealed Secrets',      namespace: 'sealed-secrets',       deployment: 'sealed-secrets-controller', container: 'controller', latestVersion: { type: 'github-tag', repo: 'bitnami-labs/sealed-secrets',          tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/bitnami-labs/sealed-secrets/releases'          } },
-  { name: 'Velero',              namespace: 'velero',               deployment: 'velero',                                            latestVersion: { type: 'github-tag', repo: 'vmware-tanzu/velero',                      tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/vmware-tanzu/velero/releases'                  } },
+  { name: 'argocd-server',                      namespace: 'argocd',              deployment: 'argocd-server',                                     latestVersion: { type: 'github-tag', repo: 'argoproj/argo-cd',                       tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/argoproj/argo-cd/releases'                    } },
+  { name: 'cert-manager',                       namespace: 'cert-manager',         deployment: 'cert-manager',                                      latestVersion: { type: 'github-tag', repo: 'cert-manager/cert-manager',               tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/cert-manager/cert-manager/releases'            } },
+  { name: 'envoy-gateway',                      namespace: 'envoy-gateway-system', deployment: 'envoy-gateway',       container: 'envoy-gateway',   latestVersion: { type: 'github-tag', repo: 'envoyproxy/gateway',                      tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/envoyproxy/gateway/releases'                   } },
+  { name: 'external-dns',                       namespace: 'external-dns',         deployment: 'external-dns',                                      latestVersion: { type: 'github-tag', repo: 'kubernetes-sigs/external-dns',            tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/kubernetes-sigs/external-dns/releases'         } },
+  { name: 'external-secrets',                   namespace: 'external-secrets',     deployment: 'external-secrets',                                  latestVersion: { type: 'github-tag', repo: 'external-secrets/external-secrets',       tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/external-secrets/external-secrets/releases'    } },
+  { name: 'source-controller',                  namespace: 'flux-system',          deployment: 'source-controller',                                 latestVersion: { type: 'github-tag', repo: 'fluxcd/flux2',                            tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/fluxcd/flux2/releases'                         } },
+  { name: 'ingress-nginx-controller',           namespace: 'ingress-nginx',        deployment: 'ingress-nginx-controller',                          latestVersion: { type: 'github-tag', repo: 'kubernetes/ingress-nginx',                tagPrefix: 'controller-v', stripPrefix: false, releaseUrl: 'https://github.com/kubernetes/ingress-nginx/releases'        } },
+  { name: 'kube-state-metrics',                 namespace: 'monitoring',           deployment: 'kube-state-metrics',                                latestVersion: { type: 'github-tag', repo: 'kubernetes/kube-state-metrics',           tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/kubernetes/kube-state-metrics/releases'        } },
+  { name: 'metrics-server',                     namespace: 'kube-system',          deployment: 'metrics-server',                                    latestVersion: { type: 'github-tag', repo: 'kubernetes-sigs/metrics-server',          tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/kubernetes-sigs/metrics-server/releases'       } },
+  { name: 'prometheus-operator',                namespace: 'monitoring',           deployment: 'prometheus-operator',                               latestVersion: { type: 'github-tag', repo: 'prometheus-operator/prometheus-operator', tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/prometheus-operator/prometheus-operator/releases' } },
+  { name: 'reloader-reloader',                  namespace: 'reloader',             deployment: 'reloader-reloader',   container: 'reloader-reloader', latestVersion: { type: 'github-tag', repo: 'stakater/Reloader',                   tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/stakater/Reloader/releases'                   } },
+  { name: 'sealed-secrets-controller',          namespace: 'sealed-secrets',       deployment: 'sealed-secrets-controller', container: 'controller', latestVersion: { type: 'github-tag', repo: 'bitnami-labs/sealed-secrets',          tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/bitnami-labs/sealed-secrets/releases'          } },
+  { name: 'velero',                             namespace: 'velero',               deployment: 'velero',                                            latestVersion: { type: 'github-tag', repo: 'vmware-tanzu/velero',                      tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/vmware-tanzu/velero/releases'                  } },
 ];
 
 function useInfraDiscovery(): { discovered: DiscoveredInfra[]; scanning: boolean } {
@@ -238,19 +325,19 @@ interface PluginCatalogueEntry { name: string; initContainerName: string; imageP
 interface DiscoveredPlugin extends PluginCatalogueEntry { found: boolean; actualInitContainerName: string; }
 
 const PLUGINS_CATALOGUE: PluginCatalogueEntry[] = [
-  { name: 'Flux Plugin',            initContainerName: 'flux-plugin',            imagePatterns: ['headlamp-plugin-flux', 'headlamp-k8s/flux'],                 latestVersion: { type: 'ghcr-tag',   image: 'headlamp-k8s/headlamp-plugin-flux',       tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/headlamp-k8s/plugins/releases'                   } },
-  { name: 'Kubescape Plugin',        initContainerName: 'kubescape-plugin',        imagePatterns: ['kubescape/headlamp-plugin'],                                  latestVersion: { type: 'github-tag', repo: 'kubescape/headlamp-plugin',              tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/kubescape/headlamp-plugin/releases'              } },
-  { name: 'Trivy Plugin',            initContainerName: 'trivy-plugin',            imagePatterns: ['trivy-headlamp-plugin', 'kubebeam/trivy'],                   latestVersion: { type: 'github-tag', repo: 'kubebeam/trivy-headlamp-plugin',         tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/kubebeam/trivy-headlamp-plugin/releases'         } },
-  { name: 'cert-manager Plugin',     initContainerName: 'cert-manager-plugin',     imagePatterns: ['headlamp-cert-manager'],                                      latestVersion: { type: 'github-tag', repo: 'headlamp-k8s/plugins',                  tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/headlamp-k8s/plugins/releases'                   } },
-  { name: 'AI Assistant Plugin',     initContainerName: 'ai-assistant-plugin',     imagePatterns: ['headlamp-ai-assistant'],                                      latestVersion: { type: 'github-tag', repo: 'headlamp-k8s/plugins',                  tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/headlamp-k8s/plugins/releases'                   } },
-  { name: 'KAITO Plugin',            initContainerName: 'kaito-plugin',            imagePatterns: ['headlamp-kaito', 'kaito-project/headlamp-kaito'],             latestVersion: { type: 'github-tag', repo: 'kaito-project/headlamp-kaito',          tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/kaito-project/headlamp-kaito/releases'           } },
-  { name: 'Karpenter Plugin',        initContainerName: 'karpenter-plugin',        imagePatterns: ['headlamp-karpenter'],                                         latestVersion: { type: 'github-tag', repo: 'headlamp-k8s/plugins',                  tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/headlamp-k8s/plugins/releases'                   } },
-  { name: 'KEDA Plugin',             initContainerName: 'keda-plugin',             imagePatterns: ['headlamp-keda'],                                              latestVersion: { type: 'github-tag', repo: 'headlamp-k8s/plugins',                  tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/headlamp-k8s/plugins/releases'                   } },
-  { name: 'Knative Plugin',          initContainerName: 'knative-plugin',          imagePatterns: ['headlamp-knative'],                                           latestVersion: { type: 'github-tag', repo: 'headlamp-k8s/plugins',                  tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/headlamp-k8s/plugins/releases'                   } },
-  { name: 'Minikube Plugin',         initContainerName: 'minikube-plugin',         imagePatterns: ['headlamp-minikube'],                                          latestVersion: { type: 'github-tag', repo: 'headlamp-k8s/plugins',                  tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/headlamp-k8s/plugins/releases'                   } },
-  { name: 'OpenCost Plugin',         initContainerName: 'opencost-plugin',         imagePatterns: ['headlamp-opencost'],                                          latestVersion: { type: 'github-tag', repo: 'headlamp-k8s/plugins',                  tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/headlamp-k8s/plugins/releases'                   } },
-  { name: 'OPA Gatekeeper Plugin',   initContainerName: 'gatekeeper-plugin',       imagePatterns: ['gatekeeper-headlamp-plugin', 'sozercan/gatekeeper-headlamp'], latestVersion: { type: 'github-tag', repo: 'sozercan/gatekeeper-headlamp-plugin',   tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/sozercan/gatekeeper-headlamp-plugin/releases'     } },
-  { name: 'Inspektor Gadget Plugin', initContainerName: 'inspektor-gadget-plugin', imagePatterns: ['inspektor-gadget/headlamp-plugin'],                           latestVersion: { type: 'github-tag', repo: 'inspektor-gadget/headlamp-plugin',      tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/inspektor-gadget/headlamp-plugin/releases'        } },
+  { name: 'flux-plugin',            initContainerName: 'flux-plugin',            imagePatterns: ['headlamp-plugin-flux', 'headlamp-k8s/flux'],                 latestVersion: { type: 'ghcr-tag',   image: 'headlamp-k8s/headlamp-plugin-flux',       tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/headlamp-k8s/plugins/releases'                   } },
+  { name: 'kubescape-plugin',        initContainerName: 'kubescape-plugin',        imagePatterns: ['kubescape/headlamp-plugin'],                                  latestVersion: { type: 'github-tag', repo: 'kubescape/headlamp-plugin',              tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/kubescape/headlamp-plugin/releases'              } },
+  { name: 'trivy-plugin',            initContainerName: 'trivy-plugin',            imagePatterns: ['trivy-headlamp-plugin', 'kubebeam/trivy'],                   latestVersion: { type: 'github-tag', repo: 'kubebeam/trivy-headlamp-plugin',         tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/kubebeam/trivy-headlamp-plugin/releases'         } },
+  { name: 'cert-manager-plugin',     initContainerName: 'cert-manager-plugin',     imagePatterns: ['headlamp-cert-manager'],                                      latestVersion: { type: 'github-tag', repo: 'headlamp-k8s/plugins',                  tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/headlamp-k8s/plugins/releases'                   } },
+  { name: 'ai-assistant-plugin',     initContainerName: 'ai-assistant-plugin',     imagePatterns: ['headlamp-ai-assistant'],                                      latestVersion: { type: 'github-tag', repo: 'headlamp-k8s/plugins',                  tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/headlamp-k8s/plugins/releases'                   } },
+  { name: 'kaito-plugin',            initContainerName: 'kaito-plugin',            imagePatterns: ['headlamp-kaito', 'kaito-project/headlamp-kaito'],             latestVersion: { type: 'github-tag', repo: 'kaito-project/headlamp-kaito',          tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/kaito-project/headlamp-kaito/releases'           } },
+  { name: 'karpenter-plugin',        initContainerName: 'karpenter-plugin',        imagePatterns: ['headlamp-karpenter'],                                         latestVersion: { type: 'github-tag', repo: 'headlamp-k8s/plugins',                  tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/headlamp-k8s/plugins/releases'                   } },
+  { name: 'keda-plugin',             initContainerName: 'keda-plugin',             imagePatterns: ['headlamp-keda'],                                              latestVersion: { type: 'github-tag', repo: 'headlamp-k8s/plugins',                  tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/headlamp-k8s/plugins/releases'                   } },
+  { name: 'knative-plugin',          initContainerName: 'knative-plugin',          imagePatterns: ['headlamp-knative'],                                           latestVersion: { type: 'github-tag', repo: 'headlamp-k8s/plugins',                  tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/headlamp-k8s/plugins/releases'                   } },
+  { name: 'minikube-plugin',         initContainerName: 'minikube-plugin',         imagePatterns: ['headlamp-minikube'],                                          latestVersion: { type: 'github-tag', repo: 'headlamp-k8s/plugins',                  tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/headlamp-k8s/plugins/releases'                   } },
+  { name: 'opencost-plugin',         initContainerName: 'opencost-plugin',         imagePatterns: ['headlamp-opencost'],                                          latestVersion: { type: 'github-tag', repo: 'headlamp-k8s/plugins',                  tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/headlamp-k8s/plugins/releases'                   } },
+  { name: 'gatekeeper-plugin',       initContainerName: 'gatekeeper-plugin',       imagePatterns: ['gatekeeper-headlamp-plugin', 'sozercan/gatekeeper-headlamp'], latestVersion: { type: 'github-tag', repo: 'sozercan/gatekeeper-headlamp-plugin',   tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/sozercan/gatekeeper-headlamp-plugin/releases'     } },
+  { name: 'inspektor-gadget-plugin', initContainerName: 'inspektor-gadget-plugin', imagePatterns: ['inspektor-gadget/headlamp-plugin'],                           latestVersion: { type: 'github-tag', repo: 'inspektor-gadget/headlamp-plugin',      tagPrefix: 'v', stripPrefix: false, releaseUrl: 'https://github.com/inspektor-gadget/headlamp-plugin/releases'        } },
 ];
 
 interface PluginDiscoveryResult { headlampFound: boolean; discovered: DiscoveredPlugin[]; scanning: boolean; }
@@ -324,7 +411,7 @@ function useAppDiscovery(): { byNamespace: Record<string, DiscoveredApp[]>; scan
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 function SaveStatusBadge({ status, error }: { status: SaveStatus; error?: string }) {
   if (status === 'idle') return null;
-  if (status === 'saving') return <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><CircularProgress size={14} sx={{ color: '#f5c518' }} /><Typography sx={{ fontSize: '13px', color: '#888' }}>Saving…</Typography></Box>;
+  if (status === 'saving') return <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><CircularProgress size={14} sx={{ color: '#f5c518' }} /><Typography sx={{ fontSize: '13px', color: 'text.secondary' }}>Saving…</Typography></Box>;
   if (status === 'saved') return <Typography sx={{ fontSize: '13px', color: '#81c784' }}>✓ Saved — versions will refresh shortly</Typography>;
   return <Typography sx={{ fontSize: '13px', color: '#ef9a9a' }}>✗ {error ?? 'Save failed'}</Typography>;
 }
@@ -333,10 +420,10 @@ function SaveStatusBadge({ status, error }: { status: SaveStatus; error?: string
 
 function ScopeRow({ label, badge, enabled, onChange }: { label: string; badge?: string; enabled: boolean; onChange: (v: boolean) => void }) {
   return (
-    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 2, py: 1.2, borderRadius: '8px', background: enabled ? 'rgba(76,175,80,0.06)' : 'rgba(255,255,255,0.02)', border: `1px solid ${enabled ? 'rgba(76,175,80,0.2)' : 'rgba(255,255,255,0.06)'}`, transition: 'all 0.15s' }}>
+    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 2, py: 1.2, borderRadius: '8px', bgcolor: enabled ? 'rgba(76,175,80,0.06)' : 'action.hover', border: '1px solid', borderColor: enabled ? 'rgba(76,175,80,0.2)' : 'divider', transition: 'all 0.15s' }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-        <Typography sx={{ fontWeight: 500, color: enabled ? '#fff' : '#555', fontSize: '14px', transition: 'color 0.15s' }}>{label}</Typography>
-        {badge && <Chip label={badge} size="small" sx={{ background: 'rgba(100,149,237,0.1)', color: '#90caf9', border: '1px solid rgba(100,149,237,0.2)', fontSize: '11px', fontFamily: 'monospace', height: '18px' }} />}
+        <Typography sx={{ fontWeight: 500, color: enabled ? 'text.primary' : 'text.disabled', fontSize: '14px', transition: 'color 0.15s' }}>{label}</Typography>
+        {badge && <Chip label={badge} size="small" sx={{ ...NS_CHIP_SX, height: '18px' }} />}
       </Box>
       <Switch checked={enabled} onChange={e => onChange(e.target.checked)} size="small" sx={{ '& .MuiSwitch-switchBase.Mui-checked': { color: '#81c784' }, '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': { backgroundColor: '#81c784' } }} />
     </Box>
@@ -388,11 +475,11 @@ function InfrastructureScopeTab() {
     catch (e: any) { setSaveError(e?.message ?? 'Unknown error'); setSaveStatus('error'); }
   };
 
-  if (scanning) return <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 4 }}><CircularProgress size={18} sx={{ color: '#f5c518' }} /><Typography sx={{ color: '#888', fontSize: '14px' }}>Scanning cluster for infrastructure components…</Typography></Box>;
+  if (scanning) return <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 4 }}><CircularProgress size={18} sx={{ color: '#f5c518' }} /><Typography sx={{ color: 'text.secondary', fontSize: '14px' }}>Scanning cluster for infrastructure components…</Typography></Box>;
 
   return (
     <Box>
-      <Typography variant="body2" sx={{ color: '#666', mb: 3, lineHeight: 1.7 }}>
+      <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3, lineHeight: 1.7 }}>
         Beacon scanned your cluster for well-known infrastructure components. Toggle what to monitor and save.
       </Typography>
 
@@ -407,9 +494,9 @@ function InfrastructureScopeTab() {
 
       {missing.length > 0 && (
         <Box sx={{ mb: 3 }}>
-          <Typography sx={{ fontSize: '11px', color: '#444', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', mb: 1.5 }}>Not detected ({missing.length})</Typography>
+          <Typography sx={{ fontSize: '11px', color: 'text.disabled', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', mb: 1.5 }}>Not detected ({missing.length})</Typography>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.8 }}>
-            {missing.map(c => <Chip key={c.name} label={c.name} size="small" sx={{ background: 'rgba(255,255,255,0.02)', color: '#444', border: '1px solid rgba(255,255,255,0.05)', fontSize: '12px' }} />)}
+            {missing.map(c => <Chip key={c.name} label={c.name} size="small" sx={{ bgcolor: 'action.hover', color: 'text.disabled', border: '1px solid', borderColor: 'divider', fontSize: '12px' }} />)}
           </Box>
         </Box>
       )}
@@ -454,11 +541,11 @@ function PluginsScopeTab() {
     catch (e: any) { setSaveError(e?.message ?? 'Unknown error'); setSaveStatus('error'); }
   };
 
-  if (scanning) return <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 4 }}><CircularProgress size={18} sx={{ color: '#f5c518' }} /><Typography sx={{ color: '#888', fontSize: '14px' }}>Reading Headlamp deployment for installed plugins…</Typography></Box>;
+  if (scanning) return <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 4 }}><CircularProgress size={18} sx={{ color: '#f5c518' }} /><Typography sx={{ color: 'text.secondary', fontSize: '14px' }}>Reading Headlamp deployment for installed plugins…</Typography></Box>;
 
   return (
     <Box>
-      <Typography variant="body2" sx={{ color: '#666', mb: 3, lineHeight: 1.7 }}>
+      <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3, lineHeight: 1.7 }}>
         Beacon read the Headlamp deployment's initContainers to detect installed plugins. Toggle what to monitor and save.
       </Typography>
 
@@ -467,16 +554,16 @@ function PluginsScopeTab() {
           ✓ Detected ({(headlampFound ? 1 : 0) + foundPlugins.length})
         </Typography>
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-          {headlampFound && <ScopeRow label="Headlamp" badge="ops-headlamp" enabled={enableHeadlamp} onChange={setEnableHeadlamp} />}
+          {headlampFound && <ScopeRow label="headlamp" badge="ops-headlamp" enabled={enableHeadlamp} onChange={setEnableHeadlamp} />}
           {foundPlugins.map(p => <ScopeRow key={p.name} label={p.name} badge={p.actualInitContainerName} enabled={!!enabled[p.name]} onChange={v => setEnabled(prev => ({ ...prev, [p.name]: v }))} />)}
         </Box>
       </Box>
 
       {missingPlugins.length > 0 && (
         <Box sx={{ mb: 3 }}>
-          <Typography sx={{ fontSize: '11px', color: '#444', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', mb: 1.5 }}>Not installed ({missingPlugins.length})</Typography>
+          <Typography sx={{ fontSize: '11px', color: 'text.disabled', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', mb: 1.5 }}>Not installed ({missingPlugins.length})</Typography>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.8 }}>
-            {missingPlugins.map(p => <Chip key={p.name} label={p.name} size="small" sx={{ background: 'rgba(255,255,255,0.02)', color: '#444', border: '1px solid rgba(255,255,255,0.05)', fontSize: '12px' }} />)}
+            {missingPlugins.map(p => <Chip key={p.name} label={p.name} size="small" sx={{ bgcolor: 'action.hover', color: 'text.disabled', border: '1px solid', borderColor: 'divider', fontSize: '12px' }} />)}
           </Box>
         </Box>
       )}
@@ -495,23 +582,23 @@ function NamespaceGroup({ ns, apps, enabled, onToggle, onToggleAll }: { ns: stri
   const allOn = apps.every(a => enabled[`${ns}/${a.name}`]);
   const someOn = apps.some(a => enabled[`${ns}/${a.name}`]);
   return (
-    <Box sx={{ mb: 1.5, borderRadius: '8px', border: '1px solid rgba(255,255,255,0.07)', overflow: 'hidden' }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 2, py: 1.2, background: 'rgba(255,255,255,0.04)', cursor: 'pointer' }} onClick={() => setOpen(o => !o)}>
+    <Box sx={{ mb: 1.5, borderRadius: '8px', border: '1px solid', borderColor: 'divider', overflow: 'hidden' }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 2, py: 1.2, bgcolor: (t: any) => t.palette.mode === 'dark' ? t.palette.action.hover : 'rgba(0,0,0,0.06)', cursor: 'pointer' }} onClick={() => setOpen(o => !o)}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-          <Typography sx={{ fontSize: '12px', color: open ? '#fff' : '#666' }}>{open ? '▾' : '▸'}</Typography>
-          <Chip label={ns} size="small" sx={{ background: 'rgba(100,149,237,0.12)', color: '#90caf9', border: '1px solid rgba(100,149,237,0.2)', fontSize: '11px', fontFamily: 'monospace', height: '20px' }} />
-          <Typography sx={{ fontSize: '12px', color: '#555' }}>{apps.length} deployment{apps.length !== 1 ? 's' : ''}</Typography>
+          <Typography sx={{ fontSize: '12px', color: open ? 'text.primary' : 'text.secondary' }}>{open ? '▾' : '▸'}</Typography>
+          <Chip label={ns} size="small" sx={{ ...NS_CHIP_SX, height: '20px' }} />
+          <Typography sx={{ fontSize: '12px', color: 'text.secondary' }}>{apps.length} deployment{apps.length !== 1 ? 's' : ''}</Typography>
         </Box>
         <Box onClick={e => e.stopPropagation()}>
           <Checkbox checked={allOn} indeterminate={someOn && !allOn} onChange={e => onToggleAll(ns, e.target.checked)} size="small"
-            sx={{ color: '#555', '&.Mui-checked': { color: '#81c784' }, '&.MuiCheckbox-indeterminate': { color: '#ffb74d' }, p: 0.5 }} />
+            sx={{ color: 'text.disabled', '&.Mui-checked': { color: '#81c784' }, '&.MuiCheckbox-indeterminate': { color: '#ffb74d' }, p: 0.5 }} />
         </Box>
       </Box>
       <Collapse in={open}>
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
           {apps.map(a => (
-            <Box key={a.name} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 2, py: 0.9, borderTop: '1px solid rgba(255,255,255,0.04)', '&:hover': { background: 'rgba(255,255,255,0.02)' } }}>
-              <Typography sx={{ fontSize: '13px', color: enabled[`${ns}/${a.name}`] ? '#ccc' : '#444', fontFamily: 'monospace' }}>{a.name}</Typography>
+            <Box key={a.name} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 2, py: 0.9, borderTop: '1px solid', borderTopColor: 'divider', bgcolor: (t: any) => t.palette.mode === 'dark' ? 'transparent' : 'rgba(0,0,0,0.01)', '&:hover': { bgcolor: 'action.hover' } }}>
+              <Typography sx={{ fontSize: '13px', color: enabled[`${ns}/${a.name}`] ? 'text.primary' : 'text.disabled', fontFamily: 'monospace' }}>{a.name}</Typography>
               <Switch checked={!!enabled[`${ns}/${a.name}`]} onChange={e => onToggle(`${ns}/${a.name}`, e.target.checked)} size="small"
                 sx={{ '& .MuiSwitch-switchBase.Mui-checked': { color: '#81c784' }, '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': { backgroundColor: '#81c784' } }} />
             </Box>
@@ -550,24 +637,24 @@ function ApplicationsScopeTab({ isPro }: { isPro: boolean }) {
   };
 
   if (!isPro) return (
-    <Paper sx={{ p: 4, background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: '12px', textAlign: 'center' }}>
-      <Typography variant="h6" sx={{ color: '#555', mb: 1.5 }}>🔒 Pro Feature</Typography>
-      <Typography variant="body2" sx={{ color: '#444', maxWidth: 420, mx: 'auto', lineHeight: 1.7 }}>
+    <Paper sx={{ p: 4, bgcolor: 'action.hover', border: '1px solid', borderColor: 'divider', borderRadius: '12px', textAlign: 'center' }}>
+      <Typography variant="h6" sx={{ color: 'text.disabled', mb: 1.5 }}>🔒 Pro Feature</Typography>
+      <Typography variant="body2" sx={{ color: 'text.disabled', maxWidth: 420, mx: 'auto', lineHeight: 1.7 }}>
         Custom application monitoring requires Beacon Pro.{' '}
         <Typography component="a" href="mailto:kerberops@outlook.com" sx={{ color: '#f5c518', textDecoration: 'none', '&:hover': { textDecoration: 'underline' } }}>Contact kerberops@outlook.com</Typography>{' '}to enable it.
       </Typography>
     </Paper>
   );
 
-  if (scanning) return <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 4 }}><CircularProgress size={18} sx={{ color: '#f5c518' }} /><Typography sx={{ color: '#888', fontSize: '14px' }}>Scanning all namespaces for deployments…</Typography></Box>;
+  if (scanning) return <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 4 }}><CircularProgress size={18} sx={{ color: '#f5c518' }} /><Typography sx={{ color: 'text.secondary', fontSize: '14px' }}>Scanning all namespaces for deployments…</Typography></Box>;
 
   const namespaces = Object.keys(byNamespace).sort();
   const totalDeployments = Object.values(byNamespace).reduce((s, a) => s + a.length, 0);
 
   return (
     <Box>
-      <Typography variant="body2" sx={{ color: '#666', mb: 3, lineHeight: 1.7 }}>
-        Found <strong style={{ color: '#ccc' }}>{totalDeployments}</strong> deployments across <strong style={{ color: '#ccc' }}>{namespaces.length}</strong> namespaces (system and infrastructure namespaces excluded). Select what to monitor and save.
+      <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3, lineHeight: 1.7 }}>
+        Found <strong>{totalDeployments}</strong> deployments across <strong>{namespaces.length}</strong> namespaces (system and infrastructure namespaces excluded). Select what to monitor and save.
       </Typography>
 
       {namespaces.length === 0 && <Alert severity="info" sx={{ background: 'rgba(33,150,243,0.06)', color: '#90caf9', border: '1px solid rgba(33,150,243,0.15)' }}>No application deployments found. All namespaces may be filtered out as infrastructure.</Alert>}
@@ -609,9 +696,9 @@ function EmailReportsTab({ isPro, companyDomain }: { isPro: boolean; companyDoma
   };
 
   if (!isPro) return (
-    <Paper sx={{ p: 4, background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: '12px', textAlign: 'center' }}>
-      <Typography variant="h6" sx={{ color: '#555', mb: 1.5 }}>🔒 Pro Feature</Typography>
-      <Typography variant="body2" sx={{ color: '#444', maxWidth: 420, mx: 'auto', lineHeight: 1.7 }}>
+    <Paper sx={{ p: 4, bgcolor: 'action.hover', border: '1px solid', borderColor: 'divider', borderRadius: '12px', textAlign: 'center' }}>
+      <Typography variant="h6" sx={{ color: 'text.disabled', mb: 1.5 }}>🔒 Pro Feature</Typography>
+      <Typography variant="body2" sx={{ color: 'text.disabled', maxWidth: 420, mx: 'auto', lineHeight: 1.7 }}>
         Email reports and delivery configuration require Beacon Pro.{' '}
         <Typography component="a" href="mailto:kerberops@outlook.com" sx={{ color: '#f5c518', textDecoration: 'none', '&:hover': { textDecoration: 'underline' } }}>Contact kerberops@outlook.com</Typography>{' '}to upgrade.
       </Typography>
@@ -620,23 +707,26 @@ function EmailReportsTab({ isPro, companyDomain }: { isPro: boolean; companyDoma
 
   return (
     <Box>
-      <Paper sx={{ p: 3, mb: 3, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px' }}>
+      <Paper sx={{ p: 3, mb: 3, bgcolor: 'action.hover', border: '1px solid', borderColor: 'divider', borderRadius: '12px' }}>
         <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 2, color: '#f5c518' }}>📧 Email Configuration</Typography>
         <Alert severity="info" sx={{ background: 'rgba(33,150,243,0.08)', color: '#90caf9', border: '1px solid rgba(33,150,243,0.2)', borderRadius: '8px' }}>
           <Typography sx={{ fontWeight: 700, fontSize: '13px', mb: 0.5 }}>Configured via Kubernetes Secret</Typography>
           <Typography sx={{ fontSize: '13px', opacity: 0.85 }}>Email delivery is managed by the <code>beacon-smtp-config</code> secret. Edit it directly or re-apply <code>06-pro-features.yaml</code> to update credentials.</Typography>
         </Alert>
       </Paper>
-      <Paper sx={{ p: 3, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px' }}>
+      <Paper sx={{ p: 3, bgcolor: 'action.hover', border: '1px solid', borderColor: 'divider', borderRadius: '12px' }}>
         <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1, color: '#f5c518' }}>🧪 Test Email Delivery</Typography>
-        <Typography variant="body2" sx={{ color: '#666', mb: 2.5 }}>Send a test PDF report to verify the full email pipeline end-to-end.</Typography>
-        <TextField fullWidth size="small" label="Send test to" type="email" placeholder={`someone@${companyDomain}`} value={testEmail} onChange={e => { setTestEmail(e.target.value); setFeedback(null); }} onKeyDown={e => { if (e.key === 'Enter' && testEmail && !testing) handleTest(); }} sx={darkFieldSx} />
+        <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2.5 }}>Send a test PDF report to verify the full email pipeline end-to-end.</Typography>
+        <TextField fullWidth size="small" label="Send test to" type="email" placeholder={`someone@${companyDomain}`} value={testEmail} onChange={e => { setTestEmail(e.target.value); setFeedback(null); }} onKeyDown={e => { if (e.key === 'Enter' && testEmail && !testing) handleTest(); }} sx={fieldSx} />
         {feedback && <Alert severity={feedback.type} sx={{ mt: 2, borderRadius: '8px', background: feedback.type === 'success' ? 'rgba(76,175,80,0.10)' : 'rgba(244,67,54,0.10)', color: feedback.type === 'success' ? '#81c784' : '#ef9a9a', border: `1px solid ${feedback.type === 'success' ? 'rgba(76,175,80,0.3)' : 'rgba(244,67,54,0.3)'}` }}>{feedback.msg}</Alert>}
         <Box sx={{ mt: 2.5 }}>
-          <Button variant="outlined" onClick={handleTest} disabled={testing || !testEmail} sx={{ borderColor: 'rgba(255,255,255,0.2)', color: '#ccc', fontWeight: 600, textTransform: 'none', px: 3, py: 1, '&:hover': { borderColor: '#90caf9', color: '#90caf9' }, '&:disabled': { borderColor: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.2)' } }}>
-            {testing ? <><CircularProgress size={14} sx={{ color: '#ccc', mr: 1 }} />Sending…</> : 'Test Connection'}
+          <Button variant="outlined" onClick={handleTest} disabled={testing || !testEmail} sx={{ borderColor: 'divider', color: 'text.primary', fontWeight: 600, textTransform: 'none', px: 3, py: 1, '&:hover': { borderColor: '#90caf9', color: '#90caf9' }, '&:disabled': { borderColor: 'divider', color: 'text.disabled' } }}>
+            {testing ? <><CircularProgress size={14} sx={{ color: 'text.primary', mr: 1 }} />Sending…</> : 'Test Connection'}
           </Button>
         </Box>
+        <Typography sx={{ fontSize: '10px', color: 'text.disabled', mt: 2.5 }}>
+          PDF reports are generated using <span style={{ color: '#42a5f5', fontFamily: 'monospace' }}>ReportLab Open Source 4.0.9</span>
+        </Typography>
       </Paper>
     </Box>
   );
@@ -666,14 +756,14 @@ function SendReportDialog({ open, onClose, section, companyDomain }: { open: boo
   };
   const emailError = !!email && !isValid(email);
   return (
-    <Dialog open={open} onClose={status === 'success' ? handleClose : undefined} maxWidth="xs" fullWidth PaperProps={{ sx: { background: '#1a1a1a', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '12px' } }}>
-      <DialogTitle sx={{ fontWeight: 700, fontSize: '16px', borderBottom: '1px solid rgba(255,255,255,0.08)', pb: 1.5 }}>📧 Send {section} Report</DialogTitle>
-      <DialogContent sx={{ pt: 3.5, pb: 2.5 }}>
+    <Dialog open={open} onClose={status === 'success' ? handleClose : undefined} maxWidth="xs" fullWidth PaperProps={{ sx: { bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider', borderRadius: '12px' } }}>
+      <DialogTitle sx={{ fontWeight: 700, fontSize: '16px', borderBottom: '1px solid', borderBottomColor: 'divider', pb: 1.5 }}>📧 Send {section} Report</DialogTitle>
+      <DialogContent sx={{ pt: 5, pb: 2.5 }}>
         {status === 'success' ? <Alert severity="success" sx={{ background: 'rgba(76,175,80,0.12)', color: '#81c784', border: '1px solid rgba(76,175,80,0.3)' }}>Report queued! It will be sent to <strong>{email}</strong> shortly.</Alert>
-          : (<><Typography variant="body2" sx={{ color: '#888', mb: 3.5, lineHeight: 1.6 }}>A PDF report for the <strong style={{ color: '#fff' }}>{section}</strong> section will be generated and emailed below.</Typography><TextField autoFocus fullWidth size="small" type="email" label="Company email" placeholder={`someone@${companyDomain}`} value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && isValid(email) && !loading) handleSend(); }} disabled={loading} error={emailError} helperText={emailError ? `Only @${companyDomain} addresses are allowed` : `E.g: someone@${companyDomain}`} sx={{ ...darkFieldSx, '& .MuiFormHelperText-root': { color: emailError ? '#ef9a9a' : '#555' } }} />{status === 'error' && <Alert severity="error" sx={{ mt: 2, background: 'rgba(244,67,54,0.1)', color: '#ef9a9a', border: '1px solid rgba(244,67,54,0.3)' }}>{errorMsg}</Alert>}</>)}
+          : (<><Typography variant="body2" sx={{ color: 'text.secondary', mt: 2, mb: 3.5, lineHeight: 1.6 }}>A PDF report for the <strong>{section}</strong> section will be generated and emailed below.</Typography><TextField autoFocus fullWidth size="small" type="email" label="Company email" placeholder={`someone@${companyDomain}`} value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && isValid(email) && !loading) handleSend(); }} disabled={loading} error={emailError} helperText={emailError ? `Only @${companyDomain} addresses are allowed` : `E.g: someone@${companyDomain}`} sx={{ ...fieldSx, '& .MuiFormHelperText-root': { color: emailError ? '#ef9a9a' : 'text.disabled' } }} />{status === 'error' && <Alert severity="error" sx={{ mt: 2, background: 'rgba(244,67,54,0.1)', color: '#ef9a9a', border: '1px solid rgba(244,67,54,0.3)' }}>{errorMsg}</Alert>}<Typography sx={{ fontSize: '10px', color: 'text.disabled', mt: 2, textAlign: 'center' }}>PDF generated using <span style={{ color: '#42a5f5', fontFamily: 'monospace' }}>ReportLab Open Source 4.0.9</span></Typography></>)}
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2.5, pt: 1, gap: 1 }}>
-        <Button onClick={handleClose} disabled={loading} sx={{ color: '#666', '&:hover': { color: '#999', background: 'rgba(255,255,255,0.05)' } }}>{status === 'success' ? 'Close' : 'Cancel'}</Button>
+        <Button onClick={handleClose} disabled={loading} sx={{ color: 'text.secondary', '&:hover': { color: 'text.primary', bgcolor: 'action.hover' } }}>{status === 'success' ? 'Close' : 'Cancel'}</Button>
         {status !== 'success' && <Button variant="contained" onClick={handleSend} disabled={loading || !isValid(email)} sx={{ background: '#f5c518', color: '#000', fontWeight: 700, px: 3, '&:hover': { background: '#e0b515' }, '&:disabled': { background: 'rgba(245,197,24,0.2)', color: 'rgba(0,0,0,0.4)' } }}>{loading ? <CircularProgress size={16} sx={{ color: '#000' }} /> : 'Send'}</Button>}
       </DialogActions>
     </Dialog>
@@ -710,16 +800,16 @@ function AppRowInner({ app, latestVersion, cacheError, onStatusChange }: { app: 
   let status: React.ReactNode;
   if (currentError) status = <StatusBadge kind="error" label="✗ Error" tooltip={currentError} href={releaseUrl} />;
   else if (cacheError) status = <StatusBadge kind="error" label="✗ Fetch failed" tooltip={cacheError} href={releaseUrl} />;
-  else if (current === 'loading...') status = <CircularProgress size={16} sx={{ color: '#bdbdbd' }} />;
+  else if (current === 'loading...') status = <CircularProgress size={16} sx={{ color: 'text.secondary' }} />;
   else if (isOutdated) status = <StatusBadge kind="outdated" label="⚠️ Update Available" href={releaseUrl} />;
   else if (isUpToDate) status = <StatusBadge kind="upToDate" label="✓ Up to Date" href={releaseUrl} />;
   else status = <StatusBadge kind="unknown" label="? Unknown" tooltip="Latest version not yet cached. Run the updater." href={releaseUrl} />;
-  const cellSx = { color: '#ccc', borderBottom: '1px solid rgba(255,255,255,0.1)' };
-  const codeStyle: React.CSSProperties = { background: 'rgba(0,0,0,0.3)', padding: '3px 8px', borderRadius: '4px', color: '#fff' };
+  const cellSx = { color: 'text.primary', borderBottom: '1px solid', borderBottomColor: 'divider' };
+  const codeStyle: React.CSSProperties = { background: 'rgba(128,128,128,0.15)', padding: '3px 8px', borderRadius: '4px' };
   return (
     <>
-      <TableCell sx={{ ...cellSx, fontWeight: 500, color: '#fff' }}>{app.name}</TableCell>
-      <TableCell sx={cellSx}><Chip label={app.currentVersion.namespace} size="small" sx={{ background: 'rgba(100,149,237,0.15)', color: '#90caf9', border: '1px solid rgba(100,149,237,0.3)', fontSize: '11px', fontFamily: 'monospace', height: '20px' }} /></TableCell>
+      <TableCell sx={{ ...cellSx, fontWeight: 500 }}>{app.name}</TableCell>
+      <TableCell sx={cellSx}><Chip label={app.currentVersion.namespace} size="small" sx={{ ...NS_CHIP_SX, height: '20px' }} /></TableCell>
       <TableCell sx={cellSx}><code style={codeStyle}>{current}</code></TableCell>
       <TableCell sx={cellSx}><code style={codeStyle}>{latestVersion ?? 'N/A'}</code></TableCell>
       <TableCell sx={cellSx}>{status}</TableCell>
@@ -765,11 +855,11 @@ function BeaconPageContent({ appsConfigMapName, versionsConfigMapName, pageTitle
           {isFiltered && <Typography variant="caption" sx={{ color: '#ffb74d' }}>Showing {visibleCount} of {apps.length}</Typography>}
         </Box>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          {lastUpdate && <Typography variant="caption" sx={{ color: '#888' }}>Updated: {formatDate(lastUpdate)}</Typography>}
+          {lastUpdate && <Typography variant="caption" sx={{ color: 'text.secondary' }}>Updated: {formatDate(lastUpdate)}</Typography>}
           {isPro ? (
-            <Button variant="outlined" size="large" onClick={() => setReportDialogOpen(true)} sx={{ borderColor: 'rgba(245,197,24,0.6)', color: '#f5c518', fontWeight: 700, fontSize: '16px', textTransform: 'none', px: 3.5, py: 1.1, '&:hover': { borderColor: '#f5c518', background: 'rgba(245,197,24,0.12)' } }}>📧 Send Report</Button>
+            <Button variant="outlined" size="large" onClick={() => setReportDialogOpen(true)} sx={{ borderColor: (t: any) => t.palette.mode === 'dark' ? 'rgba(245,197,24,0.7)' : 'rgba(245,124,0,0.6)', color: (t: any) => t.palette.mode === 'dark' ? '#f5c518' : '#f57c00', fontWeight: 600, fontSize: '14px', textTransform: 'none', px: 3.5, py: 1.1, background: (t: any) => t.palette.mode === 'dark' ? 'rgba(245,197,24,0.08)' : 'rgba(245,124,0,0.08)', '&:hover': { borderColor: (t: any) => t.palette.mode === 'dark' ? '#f5c518' : '#f57c00', background: (t: any) => t.palette.mode === 'dark' ? 'rgba(245,197,24,0.18)' : 'rgba(245,124,0,0.15)' } }}>📧 Send Report</Button>
           ) : (
-            <Tooltip title="Send Report is a Pro feature." arrow><span><Button variant="outlined" size="large" disabled sx={{ borderColor: 'rgba(255,255,255,0.12)', color: 'rgba(255,255,255,0.25)', fontWeight: 700, fontSize: '16px', textTransform: 'none', px: 3.5, py: 1.1 }}>🔒 Send Report</Button></span></Tooltip>
+            <Tooltip title="Send Report is a Pro feature." arrow><span><Button variant="outlined" size="large" disabled sx={{ borderColor: 'divider', color: 'text.disabled', fontWeight: 700, fontSize: '16px', textTransform: 'none', px: 3.5, py: 1.1 }}>🔒 Send Report</Button></span></Tooltip>
           )}
         </Box>
       </Box>
@@ -777,18 +867,18 @@ function BeaconPageContent({ appsConfigMapName, versionsConfigMapName, pageTitle
       <TableContainer sx={{ background: 'transparent' }}>
         <Table>
           <TableHead>
-            <TableRow sx={{ borderBottom: '2px solid rgba(255,255,255,0.2)' }}>
-              <TableCell sx={{ fontWeight: 600, color: '#fff' }}><TableSortLabel active direction={sortDir} onClick={() => setSortDir(d => d === 'asc' ? 'desc' : 'asc')} sx={{ color: '#fff !important', '& .MuiTableSortLabel-icon': { color: '#fff !important' } }}>Application</TableSortLabel></TableCell>
-              <TableCell sx={{ fontWeight: 600, color: '#fff' }}><FilterHeader<string> label="Namespace" allOptions={allNamespaces} activeFilters={activeNsFilters} onFiltersChange={setActiveNsFilters} renderOption={ns => ns} getOptionColor={() => '#90caf9'} /></TableCell>
-              <TableCell sx={{ fontWeight: 600, color: '#fff' }}>Current Version</TableCell>
-              <TableCell sx={{ fontWeight: 600, color: '#fff' }}>Latest Version</TableCell>
-              <TableCell sx={{ fontWeight: 600, color: '#fff' }}><FilterHeader<StatusKind> label="Status" allOptions={ALL_STATUS_FILTERS} activeFilters={activeStatusFilters} onFiltersChange={setActiveStatusFilters} renderOption={k => STATUS_FILTER_LABELS[k]} getOptionColor={k => STATUS_STYLES[k].color} /></TableCell>
+            <TableRow sx={{ borderBottom: '2px solid', borderBottomColor: 'divider' }}>
+              <TableCell sx={{ fontWeight: 600, color: 'text.primary' }}><TableSortLabel active direction={sortDir} onClick={() => setSortDir(d => d === 'asc' ? 'desc' : 'asc')} sx={{ color: 'text.primary !important', '& .MuiTableSortLabel-icon': { color: 'text.primary !important' } }}>Application</TableSortLabel></TableCell>
+              <TableCell sx={{ fontWeight: 600, color: 'text.primary' }}><FilterHeader<string> label="Namespace" allOptions={allNamespaces} activeFilters={activeNsFilters} onFiltersChange={setActiveNsFilters} renderOption={ns => ns} getOptionColor={() => '#90caf9'} /></TableCell>
+              <TableCell sx={{ fontWeight: 600, color: 'text.primary' }}>Current Version</TableCell>
+              <TableCell sx={{ fontWeight: 600, color: 'text.primary' }}>Latest Version</TableCell>
+              <TableCell sx={{ fontWeight: 600, color: 'text.primary' }}><FilterHeader<StatusKind> label="Status" allOptions={ALL_STATUS_FILTERS} activeFilters={activeStatusFilters} onFiltersChange={setActiveStatusFilters} renderOption={k => STATUS_FILTER_LABELS[k]} getOptionColor={k => STATUS_STYLES[k].color} /></TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {sortedApps.map(app => {
               const visible = activeStatusFilters.includes(statusMap[app.name] ?? 'unknown') && activeNsFilters.includes(app.currentVersion.namespace);
-              return (<TableRow key={app.name} sx={{ display: visible ? undefined : 'none', '&:hover': { background: 'rgba(255,255,255,0.05)' } }}><AppRowInner app={app} latestVersion={versionsCache.apps?.[app.name] ?? null} cacheError={versionsCache.errors?.[app.name]} onStatusChange={handleStatusChange} /></TableRow>);
+              return (<TableRow key={app.name} sx={{ display: visible ? undefined : 'none', bgcolor: (t: any) => t.palette.mode === 'dark' ? 'transparent' : 'rgba(0,0,0,0.013)', '&:hover': { bgcolor: 'action.hover' } }}><AppRowInner app={app} latestVersion={versionsCache.apps?.[app.name] ?? null} cacheError={versionsCache.errors?.[app.name]} onStatusChange={handleStatusChange} /></TableRow>);
             })}
           </TableBody>
         </Table>
@@ -814,10 +904,10 @@ const COMMON_TIMEZONES = [
   'Australia/Sydney', 'Pacific/Auckland',
 ];
 
-const tzSelectSx = { color: '#fff', '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.2)' }, '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.35)' }, '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#f5c518' }, '& .MuiSvgIcon-root': { color: '#888' } };
-const tzMenuSx  = { PaperProps: { sx: { background: '#1e1e1e', border: '1px solid rgba(255,255,255,0.12)', maxHeight: 320 } } };
-const tzItemSx  = { fontSize: '13px', color: '#ccc', '&:hover': { background: 'rgba(255,255,255,0.06)' }, '&.Mui-selected': { background: 'rgba(245,197,24,0.12)', color: '#f5c518' } };
-const tzLabelSx = { color: '#888', '&.Mui-focused': { color: '#f5c518' } };
+const tzSelectSx = { '& .MuiOutlinedInput-notchedOutline': { borderColor: 'divider' }, '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'text.secondary' }, '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#f5c518' }, '& .MuiSvgIcon-root': { color: 'text.secondary' } };
+const tzMenuSx  = { PaperProps: { sx: { bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider', maxHeight: 320 } } };
+const tzItemSx  = { fontSize: '13px', '&:hover': { bgcolor: 'action.hover' }, '&.Mui-selected': { bgcolor: 'rgba(245,197,24,0.12)', color: '#f5c518' } };
+const tzLabelSx = { color: 'text.secondary', '&.Mui-focused': { color: '#f5c518' } };
 
 function ScheduleTab({ isPro }: { isPro: boolean }) {
   const [updaterSchedule, setUpdaterSchedule]       = useState('0 9 * * *');
@@ -890,14 +980,14 @@ function ScheduleTab({ isPro }: { isPro: boolean }) {
     } catch (e: any) { setReporterSaveErr(e?.message ?? 'Save failed'); setReporterSave('error'); }
   };
 
-  if (updaterLoading) return <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 4 }}><CircularProgress size={18} sx={{ color: '#f5c518' }} /><Typography sx={{ color: '#888', fontSize: '14px' }}>Loading schedule…</Typography></Box>;
+  if (updaterLoading) return <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 4 }}><CircularProgress size={18} sx={{ color: '#f5c518' }} /><Typography sx={{ color: 'text.secondary', fontSize: '14px' }}>Loading schedule…</Typography></Box>;
 
   return (
     <Box>
       {/* ── Version Updater ── */}
-      <Paper sx={{ p: 3, mb: 3, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px' }}>
+      <Paper sx={{ p: 3, mb: 3, bgcolor: 'action.hover', border: '1px solid', borderColor: 'divider', borderRadius: '12px' }}>
         <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 0.5, color: '#f5c518' }}>🔄 Version Updater</Typography>
-        <Typography variant="body2" sx={{ color: '#666', mb: 3 }}>Controls when Beacon fetches the latest versions from GitHub / GHCR.</Typography>
+        <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3 }}>Controls when Beacon fetches the latest versions from GitHub / GHCR.</Typography>
         {updaterNotFound ? (
           <Alert severity="warning" sx={{ background: 'rgba(255,152,0,0.06)', color: '#ffb74d', border: '1px solid rgba(255,152,0,0.2)' }}>
             CronJob <code>beacon-updater</code> not found in <code>ops-headlamp</code>. Deploy <code>05-cronjob.yaml</code> first.
@@ -908,7 +998,7 @@ function ScheduleTab({ isPro }: { isPro: boolean }) {
               <TextField size="small" label="Cron Schedule" value={updaterSchedule}
                 onChange={e => { setUpdaterSchedule(e.target.value); setUpdaterSave('idle'); }}
                 helperText={<>Cron format — <Typography component="a" href="https://crontab.guru" target="_blank" rel="noopener noreferrer" sx={{ color: '#90caf9', fontSize: 'inherit' }}>crontab.guru ↗</Typography></>}
-                sx={{ ...darkFieldSx, flex: 1 }} />
+                sx={{ ...fieldSx, flex: 1 }} />
               <FormControl size="small" sx={{ minWidth: 220 }}>
                 <InputLabel sx={tzLabelSx}>Timezone</InputLabel>
                 <Select label="Timezone" value={updaterTz} onChange={e => { setUpdaterTz(e.target.value); setUpdaterSave('idle'); }} sx={tzSelectSx} MenuProps={tzMenuSx}>
@@ -924,40 +1014,40 @@ function ScheduleTab({ isPro }: { isPro: boolean }) {
 
       {/* ── Daily Reports (Pro) ── */}
       {!isPro ? (
-        <Paper sx={{ p: 4, background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: '12px', textAlign: 'center' }}>
-          <Typography variant="h6" sx={{ color: '#555', mb: 1.5 }}>🔒 Pro Feature</Typography>
-          <Typography variant="body2" sx={{ color: '#444', maxWidth: 420, mx: 'auto', lineHeight: 1.7 }}>
+        <Paper sx={{ p: 4, bgcolor: 'action.hover', border: '1px solid', borderColor: 'divider', borderRadius: '12px', textAlign: 'center' }}>
+          <Typography variant="h6" sx={{ color: 'text.disabled', mb: 1.5 }}>🔒 Pro Feature</Typography>
+          <Typography variant="body2" sx={{ color: 'text.disabled', maxWidth: 420, mx: 'auto', lineHeight: 1.7 }}>
             Daily report scheduling requires Beacon Pro.{' '}
             <Typography component="a" href="mailto:kerberops@outlook.com" sx={{ color: '#f5c518', textDecoration: 'none', '&:hover': { textDecoration: 'underline' } }}>Contact kerberops@outlook.com</Typography>{' '}to upgrade.
           </Typography>
         </Paper>
       ) : reporterLoading ? (
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 2 }}><CircularProgress size={16} sx={{ color: '#888' }} /><Typography sx={{ color: '#888', fontSize: '13px' }}>Loading reporter schedule…</Typography></Box>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 2 }}><CircularProgress size={16} sx={{ color: 'text.secondary' }} /><Typography sx={{ color: 'text.secondary', fontSize: '13px' }}>Loading reporter schedule…</Typography></Box>
       ) : reporterNotFound ? (
         <Alert severity="info" sx={{ background: 'rgba(33,150,243,0.06)', color: '#90caf9', border: '1px solid rgba(33,150,243,0.15)' }}>
           CronJob <code>beacon-reporter-daily</code> not found. Deploy <code>06-pro-features.yaml</code> to enable daily reports.
         </Alert>
       ) : (
-        <Paper sx={{ p: 3, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px' }}>
+        <Paper sx={{ p: 3, bgcolor: 'action.hover', border: '1px solid', borderColor: 'divider', borderRadius: '12px' }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2.5 }}>
             <Box>
               <Typography variant="subtitle1" sx={{ fontWeight: 700, color: '#f5c518' }}>📅 Daily Reports</Typography>
-              <Typography variant="body2" sx={{ color: '#666', mt: 0.5 }}>Schedule, recipients, and enable/disable for the automatic daily PDF report.</Typography>
+              <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>Schedule, recipients, and enable/disable for the automatic daily PDF report.</Typography>
             </Box>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mt: 0.5 }}>
-              <Typography sx={{ fontSize: '13px', color: reporterEnabled ? '#81c784' : '#555' }}>{reporterEnabled ? 'Enabled' : 'Disabled'}</Typography>
+              <Typography sx={{ fontSize: '13px', color: reporterEnabled ? '#81c784' : 'text.disabled' }}>{reporterEnabled ? 'Enabled' : 'Disabled'}</Typography>
               <Switch checked={reporterEnabled} onChange={e => { setReporterEnabled(e.target.checked); setReporterSave('idle'); }} size="small"
                 sx={{ '& .MuiSwitch-switchBase.Mui-checked': { color: '#81c784' }, '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': { backgroundColor: '#81c784' } }} />
             </Box>
           </Box>
           <TextField fullWidth size="small" label="Recipients" placeholder="devops@company.com, ops@company.com"
             value={reporterRecipients} onChange={e => { setReporterRecipients(e.target.value); setReporterSave('idle'); }}
-            helperText="Comma-separated email addresses" sx={{ ...darkFieldSx, mb: 2 }} />
+            helperText="Comma-separated email addresses" sx={{ ...fieldSx, mb: 2 }} />
           <Box sx={{ display: 'flex', gap: 2, mb: 1 }}>
             <TextField size="small" label="Cron Schedule" value={reporterSchedule}
               onChange={e => { setReporterSchedule(e.target.value); setReporterSave('idle'); }}
               helperText={<>Cron format — <Typography component="a" href="https://crontab.guru" target="_blank" rel="noopener noreferrer" sx={{ color: '#90caf9', fontSize: 'inherit' }}>crontab.guru ↗</Typography></>}
-              sx={{ ...darkFieldSx, flex: 1 }} />
+              sx={{ ...fieldSx, flex: 1 }} />
             <FormControl size="small" sx={{ minWidth: 220 }}>
               <InputLabel sx={tzLabelSx}>Timezone</InputLabel>
               <Select label="Timezone" value={reporterTz} onChange={e => { setReporterTz(e.target.value); setReporterSave('idle'); }} sx={tzSelectSx} MenuProps={tzMenuSx}>
@@ -967,7 +1057,293 @@ function ScheduleTab({ isPro }: { isPro: boolean }) {
           </Box>
           <SaveButton onSave={saveReporter} status={reporterSave} disabled={!reporterSchedule.trim()} />
           {reporterSave === 'error' && <Typography sx={{ mt: 1, fontSize: '12px', color: '#ef9a9a' }}>{reporterSaveErr}</Typography>}
+          <Typography sx={{ fontSize: '10px', color: 'text.disabled', mt: 2 }}>
+            PDF reports are generated using <span style={{ color: '#42a5f5', fontFamily: 'monospace' }}>ReportLab Open Source 4.0.9</span>
+          </Typography>
         </Paper>
+      )}
+    </Box>
+  );
+}
+
+// ─── Security tab ─────────────────────────────────────────────────────────────
+
+const SEV_META: Record<string, { color: string; bg: string }> = {
+  CRITICAL: { color: '#ef5350', bg: 'rgba(239,83,80,0.15)'  },
+  HIGH:     { color: '#ff7043', bg: 'rgba(255,112,67,0.15)' },
+  MEDIUM:   { color: '#ffca28', bg: 'rgba(255,202,40,0.12)' },
+  LOW:      { color: '#42a5f5', bg: 'rgba(66,165,245,0.12)' },
+  UNKNOWN:  { color: '#757575', bg: 'rgba(117,117,117,0.12)'},
+};
+
+function SeverityPill({ label, count }: { label: string; count: number }) {
+  const m = SEV_META[label] ?? SEV_META.UNKNOWN;
+  const dim = count === 0;
+  return (
+    <Box sx={{ textAlign: 'center', minWidth: 64 }}>
+      <Box sx={{
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        width: 40, height: 40, borderRadius: '50%',
+        bgcolor: dim ? 'action.selected' : m.bg,
+        border: dim ? '2px solid' : `2px solid ${m.color}`,
+        borderColor: dim ? 'divider' : undefined,
+        fontSize: '15px', fontWeight: 700,
+        color: dim ? 'text.disabled' : m.color,
+        mb: 0.5,
+      }}>{count}</Box>
+      <Typography sx={{ fontSize: '10px', fontWeight: 600, color: dim ? 'text.disabled' : m.color, letterSpacing: '0.5px', textTransform: 'uppercase' }}>
+        {label}
+      </Typography>
+    </Box>
+  );
+}
+
+function ScanCard({ result }: { result: ImageScanResult }) {
+  const [copied, setCopied] = React.useState(false);
+  const [showCves, setShowCves] = React.useState(false);
+  const sev = result.severity;
+  const isClean = sev.CRITICAL === 0 && sev.HIGH === 0;
+  const tag = result.image.includes(':') ? result.image.split(':').pop() ?? '' : '';
+  const shortDigest = result.digest.length > 20
+    ? `${result.digest.slice(0, 14)}…${result.digest.slice(-8)}`
+    : result.digest;
+  const vulns = result.vulnerabilities ?? [];
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(result.digest).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1800); });
+  };
+
+  return (
+    <Paper sx={{ p: 2.5, bgcolor: 'action.hover', border: '1px solid', borderColor: 'divider', borderRadius: '10px', mb: 2 }}>
+      {/* Header row */}
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Typography sx={{ fontWeight: 700, fontSize: '15px', color: 'text.primary' }}>{result.name}</Typography>
+          {tag && <Chip label={tag} size="small" sx={{ height: 20, fontSize: '11px', fontWeight: 600, background: 'rgba(245,197,24,0.15)', color: '#f5c518', border: '1px solid rgba(245,197,24,0.3)' }} />}
+        </Box>
+        <Chip
+          label={isClean ? '✓ No Critical / High CVEs' : '⚠ Vulnerabilities Found'}
+          size="small"
+          sx={{
+            height: 22, fontSize: '11px', fontWeight: 700,
+            background: isClean ? 'rgba(76,175,80,0.15)' : 'rgba(239,83,80,0.15)',
+            color: isClean ? '#81c784' : '#ef9a9a',
+            border: `1px solid ${isClean ? 'rgba(76,175,80,0.4)' : 'rgba(239,83,80,0.4)'}`,
+          }}
+        />
+      </Box>
+
+      {/* Image ref */}
+      <Typography sx={{ fontSize: '11px', color: 'text.secondary', mb: 0.5, fontFamily: 'monospace', wordBreak: 'break-all' }}>
+        📦 {result.image}
+      </Typography>
+
+      {/* Digest */}
+      {result.digest && (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
+          <Typography sx={{ fontSize: '11px', color: 'text.disabled', fontFamily: 'monospace' }}>
+            🔑 {shortDigest}
+          </Typography>
+          <Tooltip title={copied ? 'Copied!' : 'Copy full digest'}>
+            <Button onClick={handleCopy} size="small" sx={{ minWidth: 0, p: '1px 6px', fontSize: '10px', color: copied ? '#81c784' : 'text.disabled', textTransform: 'none', '&:hover': { color: '#f5c518' } }}>
+              {copied ? '✓' : 'copy'}
+            </Button>
+          </Tooltip>
+        </Box>
+      )}
+
+      {/* Base image + packages */}
+      <Typography sx={{ fontSize: '11px', color: 'text.disabled', mb: 2, fontFamily: 'monospace' }}>
+        🐧 {result.baseImage || result.os}
+        {result.packageCount > 0 && <span style={{ fontFamily: 'inherit' }}> · {result.packageCount} packages</span>}
+      </Typography>
+
+      {/* Severity pills */}
+      <Divider sx={{ borderColor: 'divider', mb: 2 }} />
+      <Box sx={{ display: 'flex', justifyContent: 'space-around' }}>
+        {(['CRITICAL','HIGH','MEDIUM','LOW','UNKNOWN'] as const).map(s => (
+          <SeverityPill key={s} label={s} count={sev[s] ?? 0} />
+        ))}
+      </Box>
+
+      {/* CVE table */}
+      {vulns.length > 0 && (
+        <>
+          <Divider sx={{ borderColor: 'divider', mt: 2, mb: 1 }} />
+          <Button
+            onClick={() => setShowCves(v => !v)} size="small"
+            sx={{ textTransform: 'none', fontSize: '11px', color: 'text.secondary', p: '2px 8px', minWidth: 0,
+                 '&:hover': { color: '#f5c518', background: 'transparent' } }}
+          >
+            {showCves ? '▼' : '▶'} {vulns.length} {vulns.length === 1 ? 'vulnerability' : 'vulnerabilities'}
+          </Button>
+          <Collapse in={showCves}>
+            <TableContainer sx={{ mt: 1 }}>
+              <Table size="small" sx={{ '& td, & th': { borderColor: 'divider', py: 0.5, px: 1 } }}>
+                <TableHead>
+                  <TableRow>
+                    {['Sev','CVE','Package','Installed','Fixed','Title'].map(h => (
+                      <TableCell key={h} sx={{ color: 'text.disabled', fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{h}</TableCell>
+                    ))}
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {vulns.map((v, i) => {
+                    const m = SEV_META[v.severity] ?? SEV_META.UNKNOWN;
+                    return (
+                      <TableRow key={`${v.id}-${i}`} sx={{ '&:hover': { bgcolor: 'action.hover' } }}>
+                        <TableCell>
+                          <Chip label={v.severity} size="small" sx={{ height: 18, fontSize: '10px', fontWeight: 700, background: m.bg, color: m.color, border: `1px solid ${m.color}30` }} />
+                        </TableCell>
+                        <TableCell sx={{ fontFamily: 'monospace', fontSize: '11px', color: '#90caf9', whiteSpace: 'nowrap' }}>{v.id}</TableCell>
+                        <TableCell sx={{ fontFamily: 'monospace', fontSize: '11px', color: 'text.primary', whiteSpace: 'nowrap' }}>{v.pkgName}</TableCell>
+                        <TableCell sx={{ fontFamily: 'monospace', fontSize: '11px', color: 'text.secondary', whiteSpace: 'nowrap' }}>{v.installed}</TableCell>
+                        <TableCell sx={{ fontFamily: 'monospace', fontSize: '11px', color: v.fixed ? '#81c784' : 'text.disabled', whiteSpace: 'nowrap' }}>{v.fixed || '—'}</TableCell>
+                        <TableCell sx={{ fontSize: '11px', color: 'text.secondary' }}>{v.title}</TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Collapse>
+        </>
+      )}
+    </Paper>
+  );
+}
+
+function LockedScanCard() {
+  return (
+    <Paper sx={{ p: 3, bgcolor: 'action.hover', border: '1px dashed', borderColor: 'divider', borderRadius: '10px', mb: 2, textAlign: 'center' }}>
+      <Typography sx={{ fontSize: '22px', mb: 1 }}>🔒</Typography>
+      <Typography sx={{ fontWeight: 600, color: 'text.secondary', mb: 0.5, fontSize: '13px' }}>beacon-updater &amp; beacon-reporter</Typography>
+      <Typography sx={{ fontSize: '12px', color: 'text.disabled', maxWidth: 360, mx: 'auto', lineHeight: 1.6 }}>
+        Upgrade to Beacon Pro to see vulnerability scan results for all beacon components.
+      </Typography>
+      <Typography component="a" href="mailto:kerberops@outlook.com" sx={{ display: 'inline-block', mt: 1.5, fontSize: '12px', color: '#f5c518', textDecoration: 'none', '&:hover': { textDecoration: 'underline' } }}>
+        Contact kerberops@outlook.com →
+      </Typography>
+    </Paper>
+  );
+}
+
+async function triggerScanner(): Promise<void> {
+  const cj = await ApiProxy.request('/apis/batch/v1/namespaces/ops-headlamp/cronjobs/beacon-scanner', { isJSON: true });
+  await ApiProxy.request('/apis/batch/v1/namespaces/ops-headlamp/jobs', {
+    method: 'POST', isJSON: true,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      apiVersion: 'batch/v1', kind: 'Job',
+      metadata: {
+        name: `beacon-scan-${Date.now()}`,
+        namespace: 'ops-headlamp',
+        labels: { 'app.kubernetes.io/name': 'beacon', 'app.kubernetes.io/component': 'scanner' },
+      },
+      spec: cj.spec.jobTemplate.spec,
+    }),
+  });
+}
+
+function SecurityTab({ isPro }: { isPro: boolean }) {
+  const { data, loading } = useSecurityScan();
+  const scannerSchedule = useScannerSchedule();
+  const [scanning, setScanning] = React.useState(false);
+  const [scanMsg, setScanMsg] = React.useState('');
+
+  const handleScanNow = async () => {
+    setScanning(true); setScanMsg('');
+    try { await triggerScanner(); setScanMsg('Scan job started — results will appear in ~2 minutes.'); }
+    catch { setScanMsg('Failed to start scan. Is beacon-scanner installed?'); }
+    finally { setScanning(false); }
+  };
+
+  // ── Determine which image result to show for free tier ──────────────────
+  const pluginResult = data?.images.find(i => i.name === 'beacon-plugin') ?? null;
+  const proImages    = data?.images.filter(i => i.name !== 'beacon-plugin') ?? [];
+
+  return (
+    <Box>
+      {/* Header */}
+      <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', mb: 3 }}>
+        <Box>
+          <Typography sx={{ fontWeight: 700, fontSize: '16px', color: 'text.primary', mb: 0.5 }}>
+            🛡️ Image Security Scan
+          </Typography>
+          {data && (
+            <>
+              <Typography sx={{ fontSize: '11px', color: 'text.disabled' }}>
+                Powered by <span style={{ color: '#42a5f5', fontFamily: 'monospace' }}>Trivy {data.trivyVersion}</span>
+                {' '}·{' '}
+                <span style={{ fontFamily: 'monospace' }}>DB updated each scan</span>
+              </Typography>
+              <Typography sx={{ fontSize: '11px', color: 'text.disabled', mt: 0.3 }}>
+                Last scan: {formatDate(data.lastScan)}
+              </Typography>
+            </>
+          )}
+          {scannerSchedule && (
+            <Typography sx={{ fontSize: '11px', color: 'text.disabled', mt: 0.3 }}>
+              Schedule:{' '}
+              <Box component="span" sx={{ fontFamily: 'monospace', color: 'text.secondary' }}>{scannerSchedule.schedule}</Box>
+              {' · '}
+              <Box component="span" sx={{ color: 'text.secondary' }}>{parseCronHuman(scannerSchedule.schedule, scannerSchedule.timeZone)}</Box>
+            </Typography>
+          )}
+        </Box>
+        <Button
+          onClick={handleScanNow} disabled={scanning} size="small" variant="outlined"
+          sx={{ borderColor: 'divider', color: 'text.secondary', textTransform: 'none', fontSize: '12px',
+               '&:hover': { borderColor: '#f5c518', color: '#f5c518' }, flexShrink: 0, ml: 2 }}
+        >
+          {scanning ? '⏳ Starting…' : '▶ Scan Now'}
+        </Button>
+      </Box>
+
+      {scanMsg && (
+        <Alert severity={scanMsg.startsWith('Failed') ? 'error' : 'info'} sx={{ mb: 2, fontSize: '12px' }}>{scanMsg}</Alert>
+      )}
+
+      {/* Loading */}
+      {loading && (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, color: 'text.secondary', py: 3 }}>
+          <CircularProgress size={16} sx={{ color: 'text.secondary' }} />
+          <Typography sx={{ fontSize: '13px' }}>Loading scan results…</Typography>
+        </Box>
+      )}
+
+      {/* No data yet */}
+      {!loading && !data && (
+        <Paper sx={{ p: 3, bgcolor: 'action.hover', border: '1px dashed', borderColor: 'divider', borderRadius: '10px', textAlign: 'center' }}>
+          <Typography sx={{ fontSize: '22px', mb: 1 }}>🔍</Typography>
+          <Typography sx={{ fontWeight: 600, color: 'text.secondary', mb: 0.5 }}>No scan results yet</Typography>
+          <Typography sx={{ fontSize: '12px', color: 'text.disabled', maxWidth: 420, mx: 'auto', lineHeight: 1.6 }}>
+            Apply <code style={{ color: '#f5c518' }}>07-scanner.yaml</code> and run{' '}
+            <code style={{ color: '#f5c518' }}>kubectl create job --from=cronjob/beacon-scanner scan-now -n ops-headlamp</code>,
+            or click <strong>Scan Now</strong> above.
+          </Typography>
+        </Paper>
+      )}
+
+      {/* Free tier — beacon-plugin only */}
+      {!loading && data && !isPro && (
+        <>
+          {pluginResult
+            ? <ScanCard result={pluginResult} />
+            : <Typography sx={{ fontSize: '12px', color: 'text.disabled', mb: 2 }}>beacon-plugin not found in scan results.</Typography>
+          }
+          <LockedScanCard />
+        </>
+      )}
+
+      {/* Pro tier — all images */}
+      {!loading && data && isPro && (
+        <>
+          {data.images.length === 0 && (
+            <Typography sx={{ fontSize: '12px', color: 'text.disabled' }}>No image results in latest scan.</Typography>
+          )}
+          {[pluginResult, ...proImages].filter(Boolean).map(r => r && <ScanCard key={r.name} result={r} />)}
+        </>
       )}
     </Box>
   );
@@ -975,7 +1351,7 @@ function ScheduleTab({ isPro }: { isPro: boolean }) {
 
 // ─── Settings page ────────────────────────────────────────────────────────────
 
-const tabSx = { color: '#666', fontWeight: 600, textTransform: 'none' as const, fontSize: '14px', '&.Mui-selected': { color: '#f5c518' } };
+const tabSx = { color: 'text.secondary', fontWeight: 600, textTransform: 'none' as const, fontSize: '14px', '&.Mui-selected': { color: '#f5c518' } };
 
 function BeaconSettingsPage() {
   const { level: licenseLevel, domain: companyDomain } = useLicenseLevel();
@@ -984,18 +1360,20 @@ function BeaconSettingsPage() {
   return (
     <Box sx={{ p: 3, maxWidth: 860 }}>
       <Typography variant="h5" sx={{ fontWeight: 600, mb: 3 }}>Settings</Typography>
-      <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 3, borderBottom: '1px solid rgba(255,255,255,0.08)', '& .MuiTabs-indicator': { backgroundColor: '#f5c518' } }}>
-        <Tab label={isPro ? 'Applications'         : '🔒 Applications'}    sx={tabSx} />
-        <Tab label={isPro ? '📧 Email & Reports'   : '🔒 Email & Reports'} sx={tabSx} />
+      <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 3, borderBottom: '1px solid', borderBottomColor: 'divider', '& .MuiTabs-indicator': { backgroundColor: '#f5c518' } }}>
+        <Tab label={isPro ? 'Applications'   : '🔒 Applications'} sx={tabSx} />
         <Tab label="Headlamp Plugins"  sx={tabSx} />
         <Tab label="Infrastructure"    sx={tabSx} />
+        <Tab label={isPro ? 'Email'          : '🔒 Email'}        sx={tabSx} />
         <Tab label="Schedule"          sx={tabSx} />
+        <Tab label="Security"          sx={tabSx} />
       </Tabs>
       {tab === 0 && <ApplicationsScopeTab isPro={isPro} />}
-      {tab === 1 && <EmailReportsTab isPro={isPro} companyDomain={companyDomain} />}
-      {tab === 2 && <PluginsScopeTab />}
-      {tab === 3 && <InfrastructureScopeTab />}
+      {tab === 1 && <PluginsScopeTab />}
+      {tab === 2 && <InfrastructureScopeTab />}
+      {tab === 3 && <EmailReportsTab isPro={isPro} companyDomain={companyDomain} />}
       {tab === 4 && <ScheduleTab isPro={isPro} />}
+      {tab === 5 && <SecurityTab isPro={isPro} />}
     </Box>
   );
 }
@@ -1008,9 +1386,9 @@ function BeaconAppsPage() {
   if (!isPro) return (
     <Box sx={{ p: 3 }}>
       <Typography variant="h5" sx={{ fontWeight: 600, mb: 4 }}>Applications</Typography>
-      <Paper sx={{ p: 4, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', textAlign: 'center' }}>
-        <Typography variant="h6" sx={{ color: '#888', mb: 1.5 }}>🔒 Pro Feature</Typography>
-        <Typography variant="body2" sx={{ color: '#555', maxWidth: 480, mx: 'auto', lineHeight: 1.7 }}>
+      <Paper sx={{ p: 4, bgcolor: 'action.hover', border: '1px solid', borderColor: 'divider', borderRadius: '12px', textAlign: 'center' }}>
+        <Typography variant="h6" sx={{ color: 'text.secondary', mb: 1.5 }}>🔒 Pro Feature</Typography>
+        <Typography variant="body2" sx={{ color: 'text.disabled', maxWidth: 480, mx: 'auto', lineHeight: 1.7 }}>
           Custom application monitoring requires Beacon Pro.{' '}
           <Typography component="a" href="mailto:kerberops@outlook.com" sx={{ color: '#f5c518', textDecoration: 'none', '&:hover': { textDecoration: 'underline' } }}>Contact kerberops@outlook.com</Typography>{' '}to enable it for your cluster.
         </Typography>

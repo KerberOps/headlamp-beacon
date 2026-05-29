@@ -38,7 +38,10 @@ Beacon adds a **Beacon** section to the Headlamp sidebar with views for each mon
 | Infrastructure | Core deployment versions vs latest on GitHub / GHCR | Free |
 | Headlamp Plugins | Installed plugin versions vs latest published | Free |
 | Applications | Custom business app monitoring | Pro |
-| Settings | Email pipeline config & test | Pro |
+| Settings → Infrastructure / Plugins | Auto-scan cluster, toggle components, save without editing YAML | Free |
+| Settings → Schedule | Configure version-fetch cron and timezone from the UI | Free |
+| Settings → Security | CVE scan results for Beacon images, powered by Trivy | Pro |
+| Settings → Email & Reports | SMTP / ACS config and on-demand PDF reports | Pro |
 
 Each row shows the running container image tag alongside the latest known version, with a status badge: **Up to Date** / **Update Available** / **Error** / **Unknown**.
 
@@ -50,11 +53,12 @@ Beacon is intentionally minimal. Here is what it costs to run:
 
 | Component | CPU request | CPU limit | Memory request | Memory limit | Disk |
 |---|---|---|---|---|---|
-| Beacon plugin | — | — | — | — | 25 KB (JS loaded in browser) |
+| Beacon plugin | — | — | — | — | ~67 KB (JS loaded in browser) |
 | beacon-updater CronJob | 50m | 200m | 64 Mi | 128 Mi | none (read-only rootfs) |
-| ConfigMaps (×4) | — | — | — | — | ~10–50 KB each |
+| beacon-scanner CronJob (Pro) | 100m | 500m | 128 Mi | 512 Mi | none |
+| ConfigMaps (×5) | — | — | — | — | ~10–50 KB each |
 
-The plugin itself consumes **no cluster resources** — it is a 25 KB JavaScript file loaded in the browser that reads ConfigMaps via the existing Headlamp API proxy.
+The plugin itself consumes **no cluster resources** — it is a JavaScript file loaded in the browser that reads ConfigMaps via the existing Headlamp API proxy.
 
 The updater CronJob runs once per day, typically completes in under 30 seconds, and then exits. It has no persistent storage and no idle CPU or memory cost between runs.
 
@@ -151,8 +155,8 @@ The updater is a Python script that fetches the latest versions and writes them 
 
 ```bash
 cd updater/
-docker build --no-cache -t ghcr.io/<your-org>/beacon-updater:2.0.8 .
-docker push ghcr.io/<your-org>/beacon-updater:2.0.8
+docker build --no-cache -t ghcr.io/<your-org>/beacon-updater:2.1.1 .
+docker push ghcr.io/<your-org>/beacon-updater:2.1.1
 ```
 
 Then update the `image` field in `deploy/04-updater-cronjob.yaml` to point to your image.

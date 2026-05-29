@@ -17,6 +17,7 @@ import os
 import re
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from typing import Callable
@@ -165,10 +166,145 @@ def fetch_manual(source: dict) -> str:
     return value
 
 
+def fetch_dockerhub_tag(source: dict) -> str:
+    """Return the latest tag of a Docker Hub image matching an optional suffix.
+
+    Queries the 100 most-recently-updated tags and picks the highest semver
+    among those ending with tagSuffix (e.g. "-alpine").
+    Works for both official images (e.g. "redis") and user images ("user/image").
+    """
+    image = source.get('image')
+    if not image:
+        raise ValueError('dockerhub-tag requires "image" field')
+    tag_suffix = source.get('tagSuffix', '')
+
+    # Official images live under library/
+    repo = image if '/' in image else f'library/{image}'
+    url = f'https://hub.docker.com/v2/repositories/{repo}/tags?page_size=100&ordering=last_updated'
+
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'beacon-updater/1.0'})
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+            data = json.loads(resp.read())
+        tags = [t['name'] for t in data.get('results', [])]
+    except Exception as e:
+        raise ValueError(f'Docker Hub tag list failed for {image}: {e}')
+
+    if not tags:
+        raise ValueError(f'no tags found for {image}')
+
+    if tag_suffix:
+        tags = [t for t in tags if t.endswith(tag_suffix)]
+        if not tags:
+            raise ValueError(f'no tags matched suffix={tag_suffix!r} for {image}')
+
+    def semver_tuple(tag: str) -> tuple:
+        m = SEMVER_RE.search(tag)
+        if not m:
+            return (0, 0, 0)
+        return tuple(map(int, m.groups()))
+
+    tags.sort(key=semver_tuple, reverse=True)
+    return tags[0]
+
+
+def fetch_acr_tag(source: dict) -> str:
+    """Return the latest tag of an Azure Container Registry image.
+
+    Auth flow: IMDS (node MSI / Workload Identity) → ACR OAuth2 token exchange.
+    The node's kubelet managed identity has AcrPull when ACR is attached to AKS.
+    """
+    registry = source.get('registry')
+    repo = source.get('repo')
+    if not registry or not repo:
+        raise ValueError('acr-tag requires "registry" and "repo" fields')
+    tag_prefix = source.get('tagPrefix', '')
+    strip_prefix = source.get('stripPrefix', False)
+
+    # Step 1: get Azure AD token from IMDS (node MSI)
+    imds_url = (
+        'http://169.254.169.254/metadata/identity/oauth2/token'
+        '?api-version=2018-02-01'
+        '&resource=https%3A%2F%2Fcontainerregistry.azure.net'
+    )
+    try:
+        req = urllib.request.Request(imds_url, headers={'Metadata': 'true', 'User-Agent': 'beacon-updater/1.0'})
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+            aad_token = json.loads(resp.read())['access_token']
+    except Exception as e:
+        raise ValueError(f'IMDS token fetch failed: {e}')
+
+    # Step 2: exchange AAD token for ACR refresh token
+    exchange_body = urllib.parse.urlencode({
+        'grant_type': 'access_token',
+        'service': registry,
+        'access_token': aad_token,
+    }).encode()
+    try:
+        req = urllib.request.Request(
+            f'https://{registry}/oauth2/exchange',
+            data=exchange_body,
+            headers={'Content-Type': 'application/x-www-form-urlencoded'},
+        )
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+            acr_refresh_token = json.loads(resp.read())['refresh_token']
+    except Exception as e:
+        raise ValueError(f'ACR token exchange failed: {e}')
+
+    # Step 3: get scoped ACR access token for metadata_read
+    token_body = urllib.parse.urlencode({
+        'grant_type': 'refresh_token',
+        'service': registry,
+        'scope': f'repository:{repo}:metadata_read',
+        'refresh_token': acr_refresh_token,
+    }).encode()
+    try:
+        req = urllib.request.Request(
+            f'https://{registry}/oauth2/token',
+            data=token_body,
+            headers={'Content-Type': 'application/x-www-form-urlencoded'},
+        )
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+            acr_access_token = json.loads(resp.read())['access_token']
+    except Exception as e:
+        raise ValueError(f'ACR scoped token failed: {e}')
+
+    # Step 4: list tags ordered by time descending
+    tags_url = f'https://{registry}/acr/v1/{repo}/_tags?orderby=timedesc&n=50&detail=false'
+    try:
+        req = urllib.request.Request(tags_url, headers={'Authorization': f'Bearer {acr_access_token}'})
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+            tags = [t['name'] for t in json.loads(resp.read()).get('tags', [])]
+    except Exception as e:
+        raise ValueError(f'ACR tag list failed for {registry}/{repo}: {e}')
+
+    if not tags:
+        raise ValueError(f'no tags found in {registry}/{repo}')
+
+    if tag_prefix:
+        tags = [t for t in tags if t.startswith(tag_prefix)]
+        if not tags:
+            raise ValueError(f'no tags matched prefix={tag_prefix!r} in {registry}/{repo}')
+
+    def semver_tuple(tag: str) -> tuple:
+        m = SEMVER_RE.search(tag)
+        if not m:
+            return (0, 0, 0)
+        return tuple(map(int, m.groups()))
+
+    tags.sort(key=semver_tuple, reverse=True)
+    tag = tags[0]
+    if strip_prefix and tag_prefix and tag.startswith(tag_prefix):
+        return tag[len(tag_prefix):]
+    return tag
+
+
 FETCHERS: dict[str, Callable[[dict], str]] = {
     'github-release': fetch_github_release,
     'github-tag': fetch_github_tag,
     'ghcr-tag': fetch_ghcr_tag,
+    'acr-tag': fetch_acr_tag,
+    'dockerhub-tag': fetch_dockerhub_tag,
     'manual': fetch_manual,
 }
 
