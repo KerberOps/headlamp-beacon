@@ -179,11 +179,11 @@ function FilterHeader<T extends string>({ label, allOptions, activeFilters, onFi
 
 // ─── Security scan hook ───────────────────────────────────────────────────────
 
-function useSecurityScan(): { data: SecurityScanData | null; loading: boolean } {
+function useSecurityScan(key: string = 'scan.json'): { data: SecurityScanData | null; loading: boolean } {
   const ConfigMap = (K8s as any).ResourceClasses.ConfigMap;
   const [cm, cmError] = ConfigMap.useGet('beacon-security-scan', 'ops-headlamp');
   if (!cm) return { data: null, loading: !cmError };
-  const { value } = parseConfigMapValue<SecurityScanData>(cm, 'scan.json', null as any);
+  const { value } = parseConfigMapValue<SecurityScanData>(cm, key, null as any);
   return { data: value, loading: false };
 }
 
@@ -1349,6 +1349,219 @@ function SecurityTab({ isPro }: { isPro: boolean }) {
   );
 }
 
+// ─── Vulnerabilities (per-section scan) ───────────────────────────────────────
+
+async function triggerSectionScan(section: string, selectedNames?: string[]): Promise<void> {
+  const cj = await ApiProxy.request('/apis/batch/v1/namespaces/ops-headlamp/cronjobs/beacon-scanner', { isJSON: true });
+  const spec = JSON.parse(JSON.stringify(cj.spec.jobTemplate.spec));
+  const inject = (list: any[]) => (list ?? []).map((c: any) => {
+    const env = [...(c.env ?? []).filter((e: any) => e.name !== 'SECTION' && e.name !== 'SCAN_NAMES'), { name: 'SECTION', value: section }];
+    if (selectedNames && selectedNames.length > 0) env.push({ name: 'SCAN_NAMES', value: selectedNames.join(',') });
+    return { ...c, env };
+  });
+  spec.template.spec.initContainers = inject(spec.template.spec.initContainers);
+  spec.template.spec.containers = inject(spec.template.spec.containers);
+  await ApiProxy.request('/apis/batch/v1/namespaces/ops-headlamp/jobs', {
+    method: 'POST', isJSON: true,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      apiVersion: 'batch/v1', kind: 'Job',
+      metadata: {
+        name: `beacon-scan-${section}-${Date.now()}`,
+        namespace: 'ops-headlamp',
+        labels: { 'app.kubernetes.io/name': 'beacon', 'app.kubernetes.io/component': 'scanner', 'beacon/section': section },
+      },
+      spec,
+    }),
+  });
+}
+
+function SectionProLock({ feature }: { feature: string }) {
+  return (
+    <Paper sx={{ p: 4, bgcolor: 'action.hover', border: '1px solid', borderColor: 'divider', borderRadius: '12px', textAlign: 'center' }}>
+      <Typography variant="h6" sx={{ color: 'text.secondary', mb: 1.5 }}>🔒 Pro Feature</Typography>
+      <Typography variant="body2" sx={{ color: 'text.disabled', maxWidth: 440, mx: 'auto', lineHeight: 1.7 }}>
+        {feature} requires Beacon Pro.{' '}
+        <Typography component="a" href="mailto:kerberops@outlook.com" sx={{ color: '#f5c518', textDecoration: 'none', '&:hover': { textDecoration: 'underline' } }}>Contact kerberops@outlook.com</Typography>{' '}to enable it.
+      </Typography>
+    </Paper>
+  );
+}
+
+function ScanSelectionDialog({ open, onClose, sectionKey, sectionLabel, onStartScan, scanning }: {
+  open: boolean; onClose: () => void; sectionKey: string; sectionLabel: string;
+  onStartScan: (names: string[]) => void; scanning: boolean;
+}) {
+  const ConfigMap = (K8s as any).ResourceClasses.ConfigMap;
+  const [cm, cmError] = ConfigMap.useGet(`beacon-${sectionKey}-apps`, 'ops-headlamp');
+  const { value: apps } = parseConfigMapValue<AppConfig[]>(cm, 'apps.json', []);
+  const loading = !cm && !cmError;
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (apps.length > 0) setSelected(new Set(apps.map((a: AppConfig) => a.name)));
+  }, [apps.map((a: AppConfig) => a.name).join(',')]);
+
+  const toggle = (name: string) => setSelected(prev => { const next = new Set(prev); next.has(name) ? next.delete(name) : next.add(name); return next; });
+  const allSelected = apps.length > 0 && selected.size === apps.length;
+  const someSelected = selected.size > 0 && selected.size < apps.length;
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(apps.map((a: AppConfig) => a.name)));
+
+  return (
+    <Dialog open={open} onClose={scanning ? undefined : onClose} maxWidth="sm" fullWidth
+      PaperProps={{ sx: { bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider', borderRadius: '12px' } }}>
+      <DialogTitle sx={{ fontWeight: 700, fontSize: '16px', borderBottom: '1px solid', borderBottomColor: 'divider', pb: 1.5 }}>
+        🛡️ Scan {sectionLabel} Images
+      </DialogTitle>
+      <DialogContent sx={{ pt: '20px !important', pb: 1 }}>
+        {loading && <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}><CircularProgress size={20} sx={{ color: '#f5c518' }} /></Box>}
+        {!loading && apps.length === 0 && (
+          <Alert severity="info" sx={{ background: 'rgba(33,150,243,0.06)', color: '#90caf9', border: '1px solid rgba(33,150,243,0.15)', mt: 1 }}>
+            No {sectionLabel.toLowerCase()} apps configured. Go to <strong>Settings → {sectionLabel}</strong> to add them.
+          </Alert>
+        )}
+        {!loading && apps.length > 0 && (
+          <Box>
+            <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2, lineHeight: 1.6 }}>
+              Select which images to scan. All are selected by default.
+            </Typography>
+            <Box onClick={toggleAll}
+              sx={{ display: 'flex', alignItems: 'center', px: 1, py: 0.5, mb: 1.5, borderRadius: '8px', bgcolor: 'action.hover', border: '1px solid', borderColor: 'divider', cursor: 'pointer', '&:hover': { borderColor: 'text.disabled' } }}>
+              <Checkbox checked={allSelected} indeterminate={someSelected} size="small"
+                sx={{ color: 'text.disabled', '&.Mui-checked': { color: '#81c784' }, '&.MuiCheckbox-indeterminate': { color: '#ffb74d' }, p: 0.5, mr: 1 }}
+                onClick={e => e.stopPropagation()} onChange={toggleAll} />
+              <Typography sx={{ fontSize: '12px', color: 'text.secondary', fontWeight: 400 }}>
+                {allSelected ? 'Deselect all' : 'Select all'} ({apps.length} image{apps.length !== 1 ? 's' : ''})
+              </Typography>
+            </Box>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+              {apps.map((app: AppConfig) => (
+                <Box key={app.name} onClick={() => toggle(app.name)}
+                  sx={{ display: 'flex', alignItems: 'center', px: 1, py: 0.8, borderRadius: '8px', border: '1px solid', cursor: 'pointer', transition: 'all 0.15s', '&:hover': { bgcolor: 'action.hover' }, borderColor: selected.has(app.name) ? 'rgba(76,175,80,0.25)' : 'divider', bgcolor: selected.has(app.name) ? 'rgba(76,175,80,0.05)' : 'transparent' }}>
+                  <Checkbox checked={selected.has(app.name)} size="small"
+                    sx={{ color: 'text.disabled', '&.Mui-checked': { color: '#81c784' }, p: 0.5, mr: 1 }}
+                    onClick={e => e.stopPropagation()} onChange={() => toggle(app.name)} />
+                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                    <Typography sx={{ fontWeight: 400, fontSize: '13px', color: selected.has(app.name) ? 'text.primary' : 'text.disabled' }}>{app.name}</Typography>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.3 }}>
+                      <Chip label={app.currentVersion.namespace} size="small" sx={{ ...NS_CHIP_SX, height: '16px', fontSize: '10px' }} />
+                      <Typography sx={{ fontFamily: 'monospace', fontSize: '10px', color: 'text.disabled' }}>{app.currentVersion.deployment}</Typography>
+                    </Box>
+                  </Box>
+                </Box>
+              ))}
+            </Box>
+          </Box>
+        )}
+      </DialogContent>
+      <DialogActions sx={{ px: 3, pb: 2.5, pt: 1.5, gap: 1 }}>
+        <Button onClick={onClose} disabled={scanning} sx={{ color: 'text.secondary', '&:hover': { color: 'text.primary', bgcolor: 'action.hover' } }}>Cancel</Button>
+        <Button variant="contained" disabled={selected.size === 0 || scanning || apps.length === 0}
+          onClick={() => onStartScan(Array.from(selected))}
+          sx={{ background: '#f5c518', color: '#000', fontWeight: 700, px: 3, '&:hover': { background: '#e0b515' }, '&:disabled': { background: 'rgba(245,197,24,0.2)', color: 'rgba(0,0,0,0.4)' } }}>
+          {scanning ? <><CircularProgress size={14} sx={{ color: '#000', mr: 1 }} />Starting…</> : `▶ Start Scan (${selected.size})`}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+function SecuritySectionTab({ sectionKey, sectionLabel, isPro, proGated }: { sectionKey: string; sectionLabel: string; isPro: boolean; proGated?: boolean }) {
+  const { data, loading } = useSecurityScan(`${sectionKey}.json`);
+  const scannerSchedule = useScannerSchedule();
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [scanMsg, setScanMsg] = useState('');
+
+  const handleStartScan = async (selectedNames: string[]) => {
+    setDialogOpen(false);
+    setScanning(true); setScanMsg('');
+    try { await triggerSectionScan(sectionKey, selectedNames); setScanMsg('Scan job started — results will appear in ~2-10 minutes. Refresh to see them.'); }
+    catch { setScanMsg('Failed to start scan. Is beacon-scanner installed?'); }
+    finally { setScanning(false); }
+  };
+
+  if (proGated && !isPro) return <SectionProLock feature={`Scanning ${sectionLabel.toLowerCase()} images`} />;
+
+  const images = data?.images ?? [];
+
+  return (
+    <Box>
+      <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', mb: 3 }}>
+        <Box>
+          <Typography sx={{ fontWeight: 700, fontSize: '16px', color: 'text.primary', mb: 0.5 }}>
+            🛡️ {sectionLabel} Image Security Scan
+          </Typography>
+          {data && (
+            <>
+              <Typography sx={{ fontSize: '11px', color: 'text.disabled' }}>
+                Powered by <span style={{ color: '#42a5f5', fontFamily: 'monospace' }}>Trivy {data.trivyVersion}</span>
+                {' '}·{' '}<span style={{ fontFamily: 'monospace' }}>DB updated each scan</span>
+              </Typography>
+              <Typography sx={{ fontSize: '11px', color: 'text.disabled', mt: 0.3 }}>Last scan: {formatDate(data.lastScan)}</Typography>
+            </>
+          )}
+          {scannerSchedule && (
+            <Typography sx={{ fontSize: '11px', color: 'text.disabled', mt: 0.3 }}>
+              On-demand — click <strong>Scan Now</strong> to select and scan {sectionLabel.toLowerCase()} images.
+            </Typography>
+          )}
+        </Box>
+        <Button onClick={() => setDialogOpen(true)} disabled={scanning} size="small" variant="outlined"
+          sx={{ borderColor: 'divider', color: 'text.secondary', textTransform: 'none', fontSize: '12px',
+               '&:hover': { borderColor: '#f5c518', color: '#f5c518' }, flexShrink: 0, ml: 2 }}>
+          {scanning ? '⏳ Starting…' : '▶ Scan Now'}
+        </Button>
+      </Box>
+
+      <ScanSelectionDialog open={dialogOpen} onClose={() => setDialogOpen(false)}
+        sectionKey={sectionKey} sectionLabel={sectionLabel}
+        onStartScan={handleStartScan} scanning={scanning} />
+
+      {scanMsg && <Alert severity={scanMsg.startsWith('Failed') ? 'error' : 'info'} sx={{ mb: 2, fontSize: '12px' }}>{scanMsg}</Alert>}
+
+      {loading && (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, color: 'text.secondary', py: 3 }}>
+          <CircularProgress size={16} sx={{ color: 'text.secondary' }} />
+          <Typography sx={{ fontSize: '13px' }}>Loading scan results…</Typography>
+        </Box>
+      )}
+
+      {!loading && (!data || images.length === 0) && (
+        <Paper sx={{ p: 3, bgcolor: 'action.hover', border: '1px dashed', borderColor: 'divider', borderRadius: '10px', textAlign: 'center' }}>
+          <Typography sx={{ fontSize: '22px', mb: 1 }}>🔍</Typography>
+          <Typography sx={{ fontWeight: 600, color: 'text.secondary', mb: 0.5 }}>No scan results yet</Typography>
+          <Typography sx={{ fontSize: '12px', color: 'text.disabled', maxWidth: 460, mx: 'auto', lineHeight: 1.6 }}>
+            Configure the deployments to monitor in <strong style={{ color: '#f5c518' }}>Settings → {sectionLabel}</strong>,
+            then click <strong>Scan Now</strong> to select which images to scan.
+          </Typography>
+        </Paper>
+      )}
+
+      {!loading && data && images.map(r => <ScanCard key={r.name} result={r} />)}
+    </Box>
+  );
+}
+
+function VulnerabilitiesPage() {
+  const { level: licenseLevel } = useLicenseLevel();
+  const isPro = licenseLevel === 'pro' || licenseLevel === 'enterprise';
+  const [tab, setTab] = useState(0);
+  return (
+    <Box sx={{ p: 3 }}>
+      <Typography variant="h5" sx={{ fontWeight: 600, mb: 3 }}>Vulnerabilities</Typography>
+      <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 3, borderBottom: '1px solid', borderBottomColor: 'divider', '& .MuiTabs-indicator': { backgroundColor: '#f5c518' } }}>
+        <Tab label={isPro ? 'Applications' : '🔒 Applications'} sx={tabSx} />
+        <Tab label="Headlamp Plugins" sx={tabSx} />
+        <Tab label="Infrastructure" sx={tabSx} />
+      </Tabs>
+      {tab === 0 && <SecuritySectionTab sectionKey="apps"    sectionLabel="Applications"     isPro={isPro} proGated />}
+      {tab === 1 && <SecuritySectionTab sectionKey="plugins" sectionLabel="Headlamp Plugins" isPro={isPro} />}
+      {tab === 2 && <SecuritySectionTab sectionKey="core"    sectionLabel="Infrastructure"   isPro={isPro} />}
+    </Box>
+  );
+}
+
 // ─── Settings page ────────────────────────────────────────────────────────────
 
 const tabSx = { color: 'text.secondary', fontWeight: 600, textTransform: 'none' as const, fontSize: '14px', '&.Mui-selected': { color: '#f5c518' } };
@@ -1403,12 +1616,14 @@ function BeaconPluginsPage()  { return <BeaconPageContent appsConfigMapName="bea
 // ─── Sidebar & routes ─────────────────────────────────────────────────────────
 
 registerSidebarEntry({ parent: null,     name: 'beacon',          label: 'Beacon',           icon: 'mdi:lighthouse', url: '/beacon/core' });
-registerSidebarEntry({ parent: 'beacon', name: 'beacon-apps',     label: 'Applications',     url: '/beacon/apps'     });
-registerSidebarEntry({ parent: 'beacon', name: 'beacon-plugins',  label: 'Headlamp Plugins', url: '/beacon/plugins'  });
-registerSidebarEntry({ parent: 'beacon', name: 'beacon-core',     label: 'Infrastructure',   url: '/beacon/core'     });
-registerSidebarEntry({ parent: 'beacon', name: 'beacon-settings', label: 'Settings',         url: '/beacon/settings' });
+registerSidebarEntry({ parent: 'beacon', name: 'beacon-apps',     label: 'Applications',     url: '/beacon/apps'          });
+registerSidebarEntry({ parent: 'beacon', name: 'beacon-plugins',  label: 'Headlamp Plugins', url: '/beacon/plugins'       });
+registerSidebarEntry({ parent: 'beacon', name: 'beacon-core',     label: 'Infrastructure',   url: '/beacon/core'          });
+registerSidebarEntry({ parent: 'beacon', name: 'beacon-vulns',    label: 'Vulnerabilities',  url: '/beacon/vulnerabilities' });
+registerSidebarEntry({ parent: 'beacon', name: 'beacon-settings', label: 'Settings',         url: '/beacon/settings'      });
 
-registerRoute({ path: '/beacon/core',     exact: true, sidebar: 'beacon-core',     noCluster: true, component: BeaconCorePage     });
-registerRoute({ path: '/beacon/plugins',  exact: true, sidebar: 'beacon-plugins',  noCluster: true, component: BeaconPluginsPage  });
-registerRoute({ path: '/beacon/apps',     exact: true, sidebar: 'beacon-apps',     noCluster: true, component: BeaconAppsPage     });
-registerRoute({ path: '/beacon/settings', exact: true, sidebar: 'beacon-settings', noCluster: true, component: BeaconSettingsPage });
+registerRoute({ path: '/beacon/core',            exact: true, sidebar: 'beacon-core',     noCluster: true, component: BeaconCorePage       });
+registerRoute({ path: '/beacon/plugins',         exact: true, sidebar: 'beacon-plugins',  noCluster: true, component: BeaconPluginsPage    });
+registerRoute({ path: '/beacon/apps',            exact: true, sidebar: 'beacon-apps',     noCluster: true, component: BeaconAppsPage       });
+registerRoute({ path: '/beacon/vulnerabilities', exact: true, sidebar: 'beacon-vulns',    noCluster: true, component: VulnerabilitiesPage  });
+registerRoute({ path: '/beacon/settings',        exact: true, sidebar: 'beacon-settings', noCluster: true, component: BeaconSettingsPage   });
