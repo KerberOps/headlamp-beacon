@@ -9,17 +9,12 @@ A version-monitoring plugin for Headlamp. Beacon watches your Kubernetes cluster
 - Sortable, filterable table with namespace and status filters
 - Status badges: Up to Date / Update Available / Error / Unknown
 - Daily version fetch via the `beacon-updater` CronJob
-- **Settings → Infrastructure / Headlamp Plugins tabs** — auto-scan cluster, toggle components, save ConfigMaps without editing YAML
-- **Settings → Schedule tab** — configure the version-fetch cron expression and timezone directly from the UI
-- **Settings → Security tab** — image CVE scan results powered by Trivy (full details require Pro)
 
 ## Features (Pro / Enterprise)
 
 - **Applications** — custom business app monitoring
 - **Send Report** — trigger on-demand PDF reports emailed to your team
-- **Settings → Email & Reports** — configure SMTP/ACS and test email delivery
-- **Settings → Security** — full CVE vulnerability table with severity breakdown per image
-- **beacon-scanner** CronJob — automated daily Trivy scans of all Beacon component images
+- **Settings** — email pipeline configuration and test delivery
 
 ## Requirements
 
